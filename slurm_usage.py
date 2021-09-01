@@ -1,5 +1,8 @@
 #!/usr/bin/env python
-"""Command to list the current cluster usage per user."""
+"""Command to list the current cluster usage per user.
+
+Part of the [slurm-usage](https://github.com/basnijholt/slurm-usage) library.
+"""
 import subprocess
 from collections import defaultdict
 
