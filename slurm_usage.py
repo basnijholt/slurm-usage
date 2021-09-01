@@ -56,10 +56,12 @@ def get_ncores(partition):
 
 
 def get_rows(data, total_partition, totals, cores_or_nodes="nodes"):
-    partitions = tuple(total_partition.keys())
+    partitions = sorted(total_partition.keys())
     headers = ["user", *partitions, "total"]
     rows = [headers]
-    for user, _data in data.items():
+    users = sorted(data.keys())
+    for user in users:
+        _data = data[user]
         row = [user]
         for partition in partitions:
             if partition in _data:
