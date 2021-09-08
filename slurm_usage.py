@@ -74,7 +74,7 @@ def get_rows(data, total_partition, totals):
         row.append(summarize_status(combine_statuses(_data)))
         rows.append(row)
     total_row = (
-        [f"{len(rows)} users"]
+        [f"{len(rows) - 1} users"]
         + [summarize_status(total_partition[partition]) for partition in partitions]
         + [summarize_status(totals)]
     )
