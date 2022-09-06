@@ -53,7 +53,9 @@ def get_max_lengths(rows):
 
 
 def get_ncores(partition):
-    name, prio = partition.split("-")
+    hyphen_split = partition.split("-")
+    name = hyphen_split[0]
+    prio = "-".join(hyphen_split[1:])
     return int("".join([x for x in name if x.isdigit()]))
 
 
