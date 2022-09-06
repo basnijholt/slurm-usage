@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="slurm-usage",
-    version="0.5",
+    version="0.6",
     description="Command to list the current cluster usage per user.",
     url="https://github.com/basnijholt/slurm-usage",
     author="Bas Nijholt",
