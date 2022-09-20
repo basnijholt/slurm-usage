@@ -2,6 +2,7 @@
 """Command to list the current cluster usage per user.
 Part of the [slurm-usage](https://github.com/basnijholt/slurm-usage) library.
 """
+from getpass import getuser
 import re
 import subprocess
 from collections import defaultdict
@@ -56,6 +57,7 @@ def get_ncores(partition):
 
 def main():
     output = squeue_output()
+    me = getuser()
     for which in ["cores", "nodes"]:
         data, total_partition, totals = process_data(output, which)
         table = Table(title=f"SLURM statistics [b]{which}[/]", show_footer=True)
@@ -67,11 +69,12 @@ def main():
         table.add_column("Total", summarize_status(totals), style="magenta")
 
         for user, _stats in sorted(data.items()):
+            kw = dict(style="bold italic") if user == me else {}
             partition_stats = [
                 summarize_status(_stats[p]) if p in _stats else "-" for p in partitions
             ]
             table.add_row(
-                user, *partition_stats, summarize_status(combine_statuses(_stats))
+                user, *partition_stats, summarize_status(combine_statuses(_stats)), **kw
             )
         console = Console()
         console.print(table, justify="center")
