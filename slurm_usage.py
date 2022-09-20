@@ -59,7 +59,7 @@ def main():
         data, total_partition, totals = process_data(output, which)
         table = Table(title=f"SLURM statistics [b]{which}[/]", show_footer=True)
         partitions = list(total_partition.keys())
-        table.add_column("User", f"{len(data) - 1} users", style="cyan")
+        table.add_column("User", f"{len(data)} users", style="cyan")
         for partition in partitions:
             tot = summarize_status(total_partition[partition])
             table.add_column(partition, tot, style="magenta")
