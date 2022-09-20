@@ -2,6 +2,7 @@
 """Command to list the current cluster usage per user.
 Part of the [slurm-usage](https://github.com/basnijholt/slurm-usage) library.
 """
+import re
 import subprocess
 from collections import defaultdict
 
@@ -49,10 +50,7 @@ def get_max_lengths(rows):
 
 
 def get_ncores(partition):
-    hyphen_split = partition.split("-")
-    name = hyphen_split[0]
-    prio = "-".join(hyphen_split[1:])
-    return int("".join([x for x in name if x.isdigit()]))
+    return re.findall(r'\d+', partition)[0]
 
 
 def main():
