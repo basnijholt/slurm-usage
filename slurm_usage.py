@@ -50,7 +50,8 @@ def get_max_lengths(rows):
 
 
 def get_ncores(partition):
-    return re.findall(r'\d+', partition)[0]
+    numbers = re.findall(r'\d+', partition)
+    return int(numbers[0])
 
 
 def main():
