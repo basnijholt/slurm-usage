@@ -1,16 +1,12 @@
 #!/usr/bin/env python
 """Command to list the current cluster usage per user.
-
 Part of the [slurm-usage](https://github.com/basnijholt/slurm-usage) library.
 """
 import subprocess
 from collections import defaultdict
 
-
-base = "\033[{}m"
-bold_start, bold_end = base.format(1), base.format(0)
-green_start, color_end = base.format(92), base.format("0;0;0")
-blue_start = base.format(94)
+from rich.console import Console
+from rich.table import Table
 
 
 def squeue_output():
@@ -59,63 +55,28 @@ def get_ncores(partition):
     return int("".join([x for x in name if x.isdigit()]))
 
 
-def get_rows(data, total_partition, totals):
-    partitions = sorted(total_partition.keys())
-    headers = ["user", *partitions, "total"]
-    rows = [headers]
-    users = sorted(data.keys())
-    for user in users:
-        _data = data[user]
-        row = [user]
-        for partition in partitions:
-            if partition in _data:
-                __data = _data[partition]
-                row.append(summarize_status(__data))
-            else:
-                row.append("-")
-        row.append(summarize_status(combine_statuses(_data)))
-        rows.append(row)
-    total_row = (
-        [f"{len(rows) - 1} users"]
-        + [summarize_status(total_partition[partition]) for partition in partitions]
-        + [summarize_status(totals)]
-    )
-    rows.append(total_row)
-    return rows
-
-
-def format_rows(rows):
-    new_rows = []
-    max_lengths = get_max_lengths(rows)
-    for row in rows:
-        _row = [entry.ljust(max_length) for max_length, entry in zip(max_lengths, row)]
-        new_rows.append(_row)
-
-    seperators = [f"{bold_start}-{bold_end}" * max_length for max_length in max_lengths]
-
-    new_rows.insert(1, seperators)
-    new_rows.insert(-1, seperators)
-
-    new_rows[0] = [f"{bold_start}{e}{bold_end}" for e in new_rows[0]]
-    new_rows[-1] = [f"{blue_start}{e}{color_end}" for e in new_rows[-1]]
-
-    for row in new_rows[2:-2]:
-        row[0] = green_start + row[0] + color_end
-        row[-1] = blue_start + row[-1] + color_end
-    return new_rows
-
-
 def main():
     output = squeue_output()
     for which in ["cores", "nodes"]:
         data, total_partition, totals = process_data(output, which)
-        print(f"Total number of {blue_start}{bold_start}{which}{bold_end}{color_end}.")
-        rows = get_rows(data, total_partition, totals)
-        rows = format_rows(rows)
+        table = Table(title=f"SLURM statistics [b]{which}[/]", show_footer=True)
+        partitions = list(total_partition.keys())
+        table.add_column("User", f"{len(data) - 1} users", style="cyan")
+        for partition in partitions:
+            tot = summarize_status(total_partition[partition])
+            table.add_column(partition, tot, style="magenta")
+        table.add_column("Total", summarize_status(totals), style="magenta")
 
-        for row in rows:
-            print(" | ".join(row))
-        print()
+        for user, _stats in sorted(data.items()):
+            partition_stats = [
+                summarize_status(_stats[p]) if p in _stats else "-" for p in partitions
+            ]
+            table.add_row(
+                user, *partition_stats, summarize_status(combine_statuses(_stats))
+            )
+        console = Console()
+        console.print(table, justify="center")
+
 
 if __name__ == "__main__":
     main()
