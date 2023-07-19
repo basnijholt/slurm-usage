@@ -12,7 +12,7 @@ from rich.table import Table
 
 
 def squeue_output():
-    cmd = [f"squeue -o '%u/%t/%D/%P'"]
+    cmd = [f"squeue -ro '%u/%t/%D/%P'"]
     return subprocess.getoutput(cmd).split("\n")[1:]
 
 
