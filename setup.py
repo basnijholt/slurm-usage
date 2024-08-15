@@ -9,5 +9,7 @@ setup(
     license="MIT",
     install_requires=["rich"],
     py_modules=["slurm_usage"],
-    entry_points={"console_scripts": ["slurm-usage=slurm_usage:main", "stats=slurm_usage:main"]},
+    entry_points={
+        "console_scripts": ["slurm-usage=slurm_usage:main", "stats=slurm_usage:main"],
+    },
 )
