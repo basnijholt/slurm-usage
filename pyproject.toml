@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=42", "wheel", "versioningit"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling", "versioningit"]
+build-backend = "hatchling.build"
 
 [project]
 name = "slurm-usage"
@@ -26,8 +26,6 @@ docs = []
 slurm-usage = "slurm_usage:main"
 stats = "slurm_usage:main"
 
-[tool.setuptools]
-py-modules = ["slurm_usage"]
 
 [tool.pytest.ini_options]
 addopts = """
@@ -80,9 +78,11 @@ max-complexity = 18
 [tool.mypy]
 python_version = "3.8"
 
-[tool.versioningit]
+[tool.hatch.version]
+source = "versioningit"
+default-version = "0.0.0+unknown"
 
-[tool.versioningit.vcs]
+[tool.hatch.version.vcs]
 method = "git"
 match = ["v*"]
 default-tag = "0.0.0"
