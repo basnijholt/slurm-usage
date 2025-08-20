@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-"""SLURM Job Usage - Optimized with incremental processing
+"""SLURM Job Usage - Optimized with incremental processing.
+
 Collects and analyzes SLURM job efficiency metrics and displays current queue status.
 
 Part of the [slurm-usage](https://github.com/basnijholt/slurm-usage) library.
@@ -24,10 +25,10 @@ import re
 import subprocess
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from getpass import getuser
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Annotated, Any, NamedTuple
 
 import polars as pl
 import typer
@@ -38,6 +39,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 from rich.table import Table
+
+UTC = timezone.utc
 
 app = typer.Typer(help="SLURM Job Monitor - Collect and analyze job efficiency metrics")
 console = Console()
@@ -184,16 +187,16 @@ class Config(BaseModel):
 
     @property
     def raw_data_dir(self) -> Path:
-        """Get the raw data directory path"""
+        """Get the raw data directory path."""
         return self.data_dir / "raw"
 
     @property
     def processed_data_dir(self) -> Path:
-        """Get the processed data directory path"""
+        """Get the processed data directory path."""
         return self.data_dir / "processed"
 
     def ensure_directories_exist(self) -> None:
-        """Ensure all data directories exist"""
+        """Ensure all data directories exist."""
         self.raw_data_dir.mkdir(parents=True, exist_ok=True)
         self.processed_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -204,7 +207,7 @@ class Config(BaseModel):
 
 
 class RawJobRecord(BaseModel):
-    """Raw job record from sacct with automatic parsing"""
+    """Raw job record from sacct with automatic parsing."""
 
     JobID: str
     JobIDRaw: str
@@ -271,19 +274,19 @@ class RawJobRecord(BaseModel):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def job_id_base(self) -> str:
-        """Extract base job ID without suffixes"""
+        """Extract base job ID without suffixes."""
         return self.JobID.split(".")[0]
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def is_batch_step(self) -> bool:
-        """Check if this is a batch step"""
+        """Check if this is a batch step."""
         return ".batch" in self.JobID
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def is_main_job(self) -> bool:
-        """Check if this is a main job record (not a step or array task)"""
+        """Check if this is a main job record (not a step or array task)."""
         # Only jobs without any suffix are main jobs
         # Array job steps like "123.0" are NOT main jobs
         # Batch steps like "123.batch" are NOT main jobs
@@ -292,17 +295,17 @@ class RawJobRecord(BaseModel):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def is_finished(self) -> bool:
-        """Check if job has finished (not RUNNING or PENDING)"""
+        """Check if job has finished (not RUNNING or PENDING)."""
         return self.State not in ["RUNNING", "PENDING", "REQUEUED", "SUSPENDED", "PREEMPTED"]
 
     @classmethod
     def get_field_names(cls) -> list[str]:
-        """Get ordered field names for sacct query"""
+        """Get ordered field names for sacct query."""
         return list(cls.model_fields.keys())
 
     @classmethod
     def from_sacct_line(cls, line: str, fields: list[str]) -> RawJobRecord | None:
-        """Parse a single sacct output line"""
+        """Parse a single sacct output line."""
         if not line:
             return None
 
@@ -313,12 +316,12 @@ class RawJobRecord(BaseModel):
         try:
             data = {fields[i]: parts[i] for i in range(len(fields))}
             return cls(**data)
-        except Exception:
+        except Exception:  # noqa: BLE001
             return None
 
 
 class ProcessedJob(BaseModel):
-    """Processed job with calculated metrics and validation"""
+    """Processed job with calculated metrics and validation."""
 
     # Identity
     job_id: str
@@ -359,7 +362,7 @@ class ProcessedJob(BaseModel):
     @field_validator("cpu_efficiency", "memory_efficiency")
     @classmethod
     def clamp_percentage(cls, v: float) -> float:
-        """Ensure percentages are within 0-100"""
+        """Ensure percentages are within 0-100."""
         return min(max(v, 0), 100)
 
     @classmethod
@@ -368,7 +371,7 @@ class ProcessedJob(BaseModel):
         main_job: RawJobRecord,
         batch_job: RawJobRecord | None = None,
     ) -> ProcessedJob:
-        """Create processed job from raw records, merging batch data if available"""
+        """Create processed job from raw records, merging batch data if available."""
         # Clean up the state - normalize all CANCELLED variants
         state = main_job.State
         if state.startswith("CANCELLED"):
@@ -449,27 +452,27 @@ class ProcessedJob(BaseModel):
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for DataFrame creation"""
+        """Convert to dictionary for DataFrame creation."""
         return self.model_dump()
 
 
 class DateCompletionTracker(BaseModel):
-    """Tracks which dates have been fully processed and don't need re-collection"""
+    """Tracks which dates have been fully processed and don't need re-collection."""
 
     completed_dates: set[str] = Field(default_factory=set)
     last_updated: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def mark_complete(self, date_str: str) -> None:
-        """Mark a date as complete"""
+        """Mark a date as complete."""
         self.completed_dates.add(date_str)
         self.last_updated = datetime.now(UTC)
 
     def is_complete(self, date_str: str) -> bool:
-        """Check if a date is marked as complete"""
+        """Check if a date is marked as complete."""
         return date_str in self.completed_dates
 
     def save(self, path: Path) -> None:
-        """Save tracker to JSON file"""
+        """Save tracker to JSON file."""
         data = self.model_dump()
         # Convert set to list for JSON serialization
         data["completed_dates"] = list(data["completed_dates"])
@@ -478,7 +481,7 @@ class DateCompletionTracker(BaseModel):
 
     @classmethod
     def load(cls, path: Path) -> DateCompletionTracker:
-        """Load tracker from JSON file"""
+        """Load tracker from JSON file."""
         if path.exists():
             with open(path) as f:
                 data = json.load(f)
@@ -493,8 +496,8 @@ class DateCompletionTracker(BaseModel):
 # ============================================================================
 
 
-def _parse_memory_mb(mem_str: str) -> float:
-    """Parse memory string to MB"""
+def _parse_memory_mb(mem_str: str) -> float:  # noqa: PLR0911
+    """Parse memory string to MB."""
     if not mem_str or mem_str in ["", "N/A", "0"]:
         return 0.0
 
@@ -517,7 +520,7 @@ def _parse_memory_mb(mem_str: str) -> float:
 
 
 def _parse_cpu_seconds(time_str: str) -> float:
-    """Parse CPU time string to seconds"""
+    """Parse CPU time string to seconds."""
     if not time_str or time_str in ["", "INVALID", "UNLIMITED"]:
         return 0.0
 
@@ -537,9 +540,9 @@ def _parse_cpu_seconds(time_str: str) -> float:
         # Handle HH:MM:SS
         if ":" in time_str:
             parts = time_str.split(":")
-            if len(parts) == 3:
+            if len(parts) == 3:  # noqa: PLR2004
                 total_seconds += float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
-            elif len(parts) == 2:
+            elif len(parts) == 2:  # noqa: PLR2004
                 total_seconds += float(parts[0]) * 60 + float(parts[1])
     except (ValueError, AttributeError):
         pass
@@ -548,7 +551,7 @@ def _parse_cpu_seconds(time_str: str) -> float:
 
 
 def _parse_int(value: str) -> int:
-    """Safely parse string to int"""
+    """Safely parse string to int."""
     try:
         return int(value) if value and value.isdigit() else 0
     except (ValueError, AttributeError):
@@ -556,7 +559,7 @@ def _parse_int(value: str) -> int:
 
 
 def _parse_datetime(date_str: str | None) -> datetime | None:
-    """Parse datetime from SLURM format string"""
+    """Parse datetime from SLURM format string."""
     if not date_str or date_str in ("Unknown", "N/A", "None"):
         return None
     try:
@@ -617,7 +620,7 @@ def parse_node_list(node_list: str) -> list[str]:
 
         # Split by comma to handle multiple ranges/values
         for part in range_part.split(","):
-            part = part.strip()
+            part = part.strip()  # noqa: PLW2901
             if "-" in part:
                 # Range like "001-003" or "3-4"
                 try:
@@ -630,10 +633,7 @@ def parse_node_list(node_list: str) -> list[str]:
                     end = int(end_str)
 
                     for i in range(start, end + 1):
-                        if pad_width > 0:
-                            node_name = f"{prefix}{str(i).zfill(pad_width)}"
-                        else:
-                            node_name = f"{prefix}{i}"
+                        node_name = f"{prefix}{str(i).zfill(pad_width)}" if pad_width > 0 else f"{prefix}{i}"
                         nodes.append(node_name)
                 except (ValueError, IndexError):
                     # If parsing fails, add the original part as-is
@@ -690,7 +690,7 @@ def squeue_output() -> list[SlurmJob]:
     """Get current SLURM queue status."""
     cmd = ["squeue", "-ro", "%u/%t/%D/%P/%C/%N/%h"]
     # Get the output and skip the header
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
     output = result.stdout.split("\n")[1:]
     return [SlurmJob.from_line(line) for line in output if line.strip()]
 
@@ -698,7 +698,7 @@ def squeue_output() -> list[SlurmJob]:
 def get_total_cores(node_name: str) -> int:
     """Get total number of cores for a given node."""
     cmd = ["scontrol", "show", "node", node_name]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
     output = result.stdout
 
     # Find the line with "CPUTot" which indicates the total number of CPUs (cores)
@@ -794,7 +794,7 @@ def _create_bar_chart(
     width: int = 50,
     top_n: int = 20,
     unit: str = "",
-    show_percentage: bool = False,
+    show_percentage: bool = False,  # noqa: FBT001, FBT002
 ) -> None:
     """Create a horizontal bar chart using Rich."""
     if not values or len(values) == 0:
@@ -879,15 +879,15 @@ def _load_raw_records_from_parquet(raw_file: Path, date_str: str) -> list[RawJob
                 job_date = _extract_job_date(record.Start, record.Submit)
                 if job_date == date_str:
                     raw_records.append(record)
-            except Exception:
+            except Exception:  # noqa: BLE001, PERF203, S112
                 continue  # Skip invalid records
 
         console.print(f"[cyan]Loaded {len(raw_records)} valid records for {date_str}[/cyan]")
-        return raw_records
-
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         console.print(f"[yellow]Could not load raw file for {date_str}: {e}[/yellow]")
         return []
+    else:
+        return raw_records
 
 
 def _load_recent_data(
@@ -895,7 +895,7 @@ def _load_recent_data(
     days: int,
     data_type: str = "processed",
 ) -> pl.DataFrame | None:
-    """Load recent data files efficiently from daily directories
+    """Load recent data files efficiently from daily directories.
 
     Args:
         config: Configuration object
@@ -930,7 +930,7 @@ def _load_recent_data(
         try:
             df = pl.read_parquet(f)
             dfs.append(df)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001, PERF203
             console.print(f"[yellow]Warning: Could not read {f}: {e}[/yellow]")
             continue
 
@@ -941,15 +941,13 @@ def _load_recent_data(
 
     # Deduplicate by job_id if processing processed data
     if data_type == "processed" and "job_id" in combined.columns:
-        deduplicated = combined.sort("processed_date", descending=True).unique(
+        return combined.sort("processed_date", descending=True).unique(
             subset=["job_id"],
             keep="first",
         )
-        return deduplicated
     if data_type == "raw" and "JobIDRaw" in combined.columns:
         # Deduplicate raw data by JobIDRaw
-        deduplicated = combined.unique(subset=["JobIDRaw"], keep="last")
-        return deduplicated
+        return combined.unique(subset=["JobIDRaw"], keep="last")
 
     return combined
 
@@ -1098,7 +1096,7 @@ def _extract_job_date(start_time: str | None, submit_time: str | None) -> str | 
             # Handle both full ISO format and date-only format
             date_part = start_time.split("T")[0] if "T" in start_time else start_time[:10]
             # Validate it looks like a date
-            if len(date_part) == 10 and date_part.count("-") == 2:
+            if len(date_part) == 10 and date_part.count("-") == 2:  # noqa: PLR2004
                 return date_part
         except (IndexError, AttributeError):
             pass
@@ -1107,7 +1105,7 @@ def _extract_job_date(start_time: str | None, submit_time: str | None) -> str | 
     if submit_time and submit_time not in ["Unknown", "N/A", "", "None"]:
         try:
             date_part = submit_time.split("T")[0] if "T" in submit_time else submit_time[:10]
-            if len(date_part) == 10 and date_part.count("-") == 2:
+            if len(date_part) == 10 and date_part.count("-") == 2:  # noqa: PLR2004
                 return date_part
         except (IndexError, AttributeError):
             pass
@@ -1115,10 +1113,10 @@ def _extract_job_date(start_time: str | None, submit_time: str | None) -> str | 
     return None
 
 
-def _fetch_jobs_for_date(
+def _fetch_jobs_for_date(  # noqa: PLR0912
     date_str: str,
     config: Config,
-    skip_if_complete: bool = True,
+    skip_if_complete: bool = True,  # noqa: FBT001, FBT002
     completion_tracker: DateCompletionTracker | None = None,
 ) -> tuple[list[RawJobRecord], list[ProcessedJob], bool]:
     """Fetch and process jobs for a specific date.
@@ -1149,7 +1147,7 @@ def _fetch_jobs_for_date(
                 if completion_tracker:
                     completion_tracker.mark_complete(date_str)
                 return [], [], True
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass  # If we can't read it, re-collect
 
     # Load existing processed data to track what we've seen
@@ -1159,7 +1157,7 @@ def _fetch_jobs_for_date(
             existing_df = pl.read_parquet(processed_file)
             for row in existing_df.iter_rows(named=True):
                 existing_job_states[row["job_id"]] = row["state"]
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
     # Get raw records - try raw file first if processed is missing
@@ -1191,7 +1189,7 @@ def _fetch_jobs_for_date(
                 is_complete = incomplete == 0
                 if is_complete and completion_tracker:
                     completion_tracker.mark_complete(date_str)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
         return [], [], is_complete
 
@@ -1241,7 +1239,7 @@ def _extract_node_usage_data(df: pl.DataFrame) -> list[dict[str, float | str]]:
 
         # Add usage data for each parsed node
         for node in parsed_nodes:
-            node_usage.append(
+            node_usage.append(  # noqa: PERF401
                 {
                     "node": node,
                     "cpu_hours": cpu_hours,
@@ -1257,7 +1255,7 @@ def _extract_node_usage_data(df: pl.DataFrame) -> list[dict[str, float | str]]:
 _NODE_INFO_CACHE: dict[str, dict[str, int]] = {}
 
 
-def _get_node_info_from_slurm() -> dict[str, dict[str, int]]:
+def _get_node_info_from_slurm() -> dict[str, dict[str, int]]:  # noqa: PLR0912
     """Get node CPU and GPU information from SLURM using sinfo.
 
     Returns:
@@ -1282,7 +1280,7 @@ def _get_node_info_from_slurm() -> dict[str, dict[str, int]]:
             for line in result.stdout.strip().split("\n"):
                 if line:
                     parts = line.strip().split(",")
-                    if len(parts) == 2:
+                    if len(parts) == 2:  # noqa: PLR2004
                         node_name = parts[0]
                         try:
                             cpus = int(parts[1])
@@ -1299,7 +1297,7 @@ def _get_node_info_from_slurm() -> dict[str, dict[str, int]]:
             for line in result.stdout.strip().split("\n"):
                 if line:
                     parts = line.strip().split(",")
-                    if len(parts) == 2:
+                    if len(parts) == 2:  # noqa: PLR2004
                         node_name = parts[0]
                         gres = parts[1]
 
@@ -1322,7 +1320,7 @@ def _get_node_info_from_slurm() -> dict[str, dict[str, int]]:
         # Cache the results
         _NODE_INFO_CACHE = node_info
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         console.print(f"[yellow]Warning: Could not get node info from sinfo: {e}[/yellow]")
 
     return node_info
@@ -1347,7 +1345,8 @@ def _get_node_cpus(node_name: str) -> int:
         return node_info[node_name]["cpus"]
 
     # No fallback - fail if we can't get info from SLURM
-    raise ValueError(f"Could not get CPU count for node '{node_name}' from SLURM")
+    msg = f"Could not get CPU count for node '{node_name}' from SLURM"
+    raise ValueError(msg)
 
 
 def _get_node_gpus(node_name: str) -> int:
@@ -1369,7 +1368,8 @@ def _get_node_gpus(node_name: str) -> int:
         return node_info[node_name]["gpus"]
 
     # No fallback - fail if we can't get info from SLURM
-    raise ValueError(f"Could not get GPU count for node '{node_name}' from SLURM")
+    msg = f"Could not get GPU count for node '{node_name}' from SLURM"
+    raise ValueError(msg)
 
 
 def _calculate_analysis_period_days(df: pl.DataFrame) -> int:
@@ -1449,13 +1449,11 @@ def _aggregate_node_statistics(
     )
 
     # Add utilization percentage
-    node_stats = node_stats.with_columns(
+    return node_stats.with_columns(
         (pl.col("total_cpu_hours") / pl.col("cpu_hours_available") * 100).alias(
             "cpu_utilization_pct",
         ),
     )
-
-    return node_stats
 
 
 def _display_node_usage_table(node_stats: pl.DataFrame) -> None:
@@ -1603,8 +1601,8 @@ def _create_node_usage_stats(df: pl.DataFrame) -> None:
 # ============================================================================
 
 
-def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:
-    """Create and display comprehensive resource usage statistics
+def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PLR0915
+    """Create and display comprehensive resource usage statistics.
 
     Args:
         df: DataFrame with job data
@@ -1939,22 +1937,13 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:
 
 
 @app.command()
-def collect(
-    days: int = typer.Option(1, "--days", "-d", help="Days to look back"),
-    data_dir: Path = typer.Option(
-        DATA_DIR,
-        "--data-dir",
-        help="Data directory",
-    ),
-    show_summary: bool = typer.Option(True, "--summary", help="Show summary after collection"),
-    n_parallel: int = typer.Option(
-        4,
-        "--n-parallel",
-        "-n",
-        help="Number of parallel workers for date-based collection",
-    ),
+def collect(  # noqa: PLR0912, PLR0915
+    days: Annotated[int, typer.Option("--days", "-d", help="Days to look back")] = 1,
+    data_dir: Annotated[Path, typer.Option("--data-dir", help="Data directory")] = DATA_DIR,
+    show_summary: Annotated[bool, typer.Option("--summary", help="Show summary after collection")] = True,  # noqa: FBT002
+    n_parallel: Annotated[int, typer.Option("--n-parallel", "-n", help="Number of parallel workers for date-based collection")] = 4,
 ) -> None:
-    """Collect job data from SLURM using parallel date-based queries"""
+    """Collect job data from SLURM using parallel date-based queries."""
     console.print(
         Panel.fit(
             f"[bold cyan]SLURM Job Monitor[/bold cyan]\nParallel collection with {n_parallel} workers",
@@ -2074,7 +2063,7 @@ def collect(
                     status = f"[green]{len(processed_jobs)} jobs {status_icon}[/green]" if processed_jobs else f"[dim]skipped {status_icon}[/dim]"
                     progress.update(task, advance=1, description=f"Collected {date_str}: {status}")
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     console.print(f"[red]Error collecting {date_str}: {e}[/red]")
                     progress.update(task, advance=1)
 
@@ -2108,14 +2097,10 @@ def collect(
 
 @app.command()
 def analyze(
-    data_dir: Path = typer.Option(
-        DATA_DIR,
-        "--data-dir",
-        help="Data directory",
-    ),
-    days: int = typer.Option(7, "--days", "-d", help="Days to analyze"),
+    data_dir: Annotated[Path, typer.Option("--data-dir", help="Data directory")] = DATA_DIR,
+    days: Annotated[int, typer.Option("--days", "-d", help="Days to analyze")] = 7,
 ) -> None:
-    """Analyze collected job data"""
+    """Analyze collected job data."""
     console.print(
         Panel.fit(
             f"[bold cyan]Job Efficiency Analysis[/bold cyan]\nAnalyzing last {days} days",
@@ -2155,13 +2140,9 @@ def analyze(
 
 @app.command()
 def status(
-    data_dir: Path = typer.Option(
-        DATA_DIR,
-        "--data-dir",
-        help="Data directory",
-    ),
+    data_dir: Annotated[Path, typer.Option("--data-dir", help="Data directory")] = DATA_DIR,
 ) -> None:
-    """Show monitoring system status"""
+    """Show monitoring system status."""
     console.print(Panel.fit("[bold cyan]SLURM Job Monitor Status[/bold cyan]", border_style="cyan"))
 
     config = Config(data_dir=data_dir)
@@ -2211,7 +2192,7 @@ def status(
 
 @app.command()
 def current() -> None:
-    """Display current cluster usage statistics from squeue"""
+    """Display current cluster usage statistics from squeue."""
     output = squeue_output()
     me = getuser()
     for which in ["cores", "nodes"]:
@@ -2233,7 +2214,7 @@ def current() -> None:
 
 @app.command()
 def nodes() -> None:
-    """Display node information from SLURM"""
+    """Display node information from SLURM."""
     console.print(Panel.fit("[bold cyan]SLURM Node Information[/bold cyan]", border_style="cyan"))
 
     # Clear cache to get fresh data
@@ -2285,17 +2266,17 @@ def nodes() -> None:
 
 @app.command()
 def test() -> None:
-    """Run a quick test of the system"""
+    """Run a quick test of the system."""
     console.print("[cyan]Running system test...[/cyan]")
 
     # Test sacct access
     try:
-        result = subprocess.run("sacct --version", shell=True, capture_output=True, text=True, check=False)
+        result = subprocess.run("sacct --version", shell=True, capture_output=True, text=True, check=False)  # noqa: S607
         if result.returncode == 0:
             console.print("[green]✓ sacct is accessible[/green]")
         else:
             console.print("[red]✗ sacct not accessible[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1)  # noqa: TRY301
     except Exception as e:
         console.print(f"[red]✗ Error testing sacct: {e}[/red]")
         raise typer.Exit(1) from e

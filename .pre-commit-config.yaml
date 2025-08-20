@@ -21,3 +21,4 @@ repos:
         additional_dependencies:
           - types-setuptools
           - pydantic
+          - types-PyYAML
