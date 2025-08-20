@@ -128,15 +128,19 @@ def capture_snapshots() -> None:  # noqa: PLR0915
 
     # Save metadata about the capture
     captured_dates = []
+    date_to_file_mapping = {}
     for i in range(days_to_capture):
         date = today - timedelta(days=i)
-        captured_dates.append(date.strftime("%Y-%m-%d"))
+        date_str = date.strftime("%Y-%m-%d")
+        captured_dates.append(date_str)
+        date_to_file_mapping[date_str] = f"sacct_day_{i}"
 
     metadata = {
         "capture_date": datetime.now().isoformat(),
         "fields": fields,
         "captured_dates": captured_dates,
         "days_captured": days_to_capture,
+        "date_to_file_mapping": date_to_file_mapping,
     }
     with open(snapshots_dir / "metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)

@@ -230,7 +230,7 @@ def _run(cmd: str | list[str], *, shell: bool = False) -> CommandResult:
         # Try exact matching first
         if cmd_str in command_map:
             file_prefix = command_map[cmd_str]
-        # For sacct commands, try to map dates to day indices
+        # For sacct commands, use date mapping from metadata
         elif cmd_str.startswith("sacct -a -S "):
             import re
 
@@ -239,20 +239,16 @@ def _run(cmd: str | list[str], *, shell: bool = False) -> CommandResult:
             if date_match:
                 requested_date = date_match.group(1)
 
-                # Build a date-to-day mapping from existing commands
-                date_to_day = {}
-                for existing_cmd, prefix in command_map.items():
-                    if existing_cmd.startswith("sacct -a -S ") and "sacct_day_" in prefix:
-                        existing_date_match = re.search(r"-S (\d{4}-\d{2}-\d{2})T", existing_cmd)
-                        if existing_date_match:
-                            existing_date = existing_date_match.group(1)
-                            date_to_day[existing_date] = prefix
+                # Load date mapping from metadata
+                metadata_file = snapshot_dir / "metadata.json"
+                with metadata_file.open() as f:
+                    metadata = json.load(f)
 
-                # Try to use an existing snapshot for this date
-                if requested_date in date_to_day:
-                    file_prefix = date_to_day[requested_date]
+                date_mapping = metadata.get("date_to_file_mapping", {})
+                if requested_date in date_mapping:
+                    file_prefix = date_mapping[requested_date]
                 else:
-                    # If exact date not found, could use a default or return empty
+                    # Date not in our snapshots, return empty result
                     return CommandResult("", "", 0, cmd_str)
             else:
                 return CommandResult("", "", 1, cmd_str)
