@@ -29,8 +29,8 @@ test = ["pytest", "pre-commit", "coverage", "pytest-cov"]
 docs = []
 
 [project.scripts]
-slurm-usage = "slurm_usage:main"
-stats = "slurm_usage:main"
+slurm-usage = "slurm_usage:app"
+stats = "slurm_usage:app"
 
 
 [tool.pytest.ini_options]
