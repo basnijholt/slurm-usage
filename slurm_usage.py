@@ -1957,7 +1957,7 @@ def collect(
     """Collect job data from SLURM using parallel date-based queries"""
     console.print(
         Panel.fit(
-            f"[bold cyan]SLURM Job Monitor[/bold cyan]\n" f"Parallel collection with {n_parallel} workers",
+            f"[bold cyan]SLURM Job Monitor[/bold cyan]\nParallel collection with {n_parallel} workers",
             border_style="cyan",
         ),
     )
@@ -1986,7 +1986,7 @@ def collect(
     # Report how many dates are already complete
     already_complete = sum(1 for d in dates_to_collect if completion_tracker.is_complete(d))
     console.print(
-        f"[cyan]Collecting data for {len(dates_to_collect)} dates " f"({already_complete} already complete) using {n_parallel} workers[/cyan]",
+        f"[cyan]Collecting data for {len(dates_to_collect)} dates ({already_complete} already complete) using {n_parallel} workers[/cyan]",
     )
 
     # Collect data in parallel
