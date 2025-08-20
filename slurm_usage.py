@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """Command to list the current cluster usage per user.
+
 Part of the [slurm-usage](https://github.com/basnijholt/slurm-usage) library.
 """
 
@@ -9,13 +10,15 @@ import re
 import subprocess
 from collections import defaultdict
 from getpass import getuser
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from rich.console import Console
 from rich.table import Table
 
 
 class SlurmJob(NamedTuple):
+    """Represents a SLURM job with its properties."""
+
     user: str
     status: str
     nnodes: int
@@ -26,22 +29,33 @@ class SlurmJob(NamedTuple):
 
     @classmethod
     def from_line(cls, line: str) -> SlurmJob:
+        """Create a SlurmJob from a squeue output line."""
         user, status, nnodes, partition, cores, node, oversubscribe = line.split("/")
         return cls(
-            user, status, int(nnodes), partition, int(cores), node, oversubscribe
+            user,
+            status,
+            int(nnodes),
+            partition,
+            int(cores),
+            node,
+            oversubscribe,
         )
 
 
 def squeue_output() -> list[SlurmJob]:
-    cmd = "squeue -ro '%u/%t/%D/%P/%C/%N/%h'"
+    """Get current SLURM queue status."""
+    cmd = ["squeue", "-ro", "%u/%t/%D/%P/%C/%N/%h"]
     # Get the output and skip the header
-    output = subprocess.getoutput(cmd).split("\n")[1:]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
+    output = result.stdout.split("\n")[1:]
     return [SlurmJob.from_line(line) for line in output]
 
 
 def get_total_cores(node_name: str) -> int:
-    cmd = f"scontrol show node {node_name}"
-    output = subprocess.getoutput(cmd)
+    """Get total number of cores for a given node."""
+    cmd = ["scontrol", "show", "node", node_name]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
+    output = result.stdout
 
     # Find the line with "CPUTot" which indicates the total number of CPUs (cores)
     for line in output.splitlines():
@@ -52,13 +66,25 @@ def get_total_cores(node_name: str) -> int:
     return 0  # Return 0 if not found
 
 
-def process_data(output: list[SlurmJob], cores_or_nodes: str):
-    data = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
-    total_partition = defaultdict(lambda: defaultdict(int))
-    totals = defaultdict(int)
+def process_data(
+    output: list[SlurmJob],
+    cores_or_nodes: str,
+) -> tuple[
+    defaultdict[str, defaultdict[str, defaultdict[str, int]]],
+    defaultdict[str, defaultdict[str, int]],
+    defaultdict[str, int],
+]:
+    """Process SLURM job data and aggregate statistics."""
+    data: defaultdict[str, defaultdict[str, defaultdict[str, int]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(int)),
+    )
+    total_partition: defaultdict[str, defaultdict[str, int]] = defaultdict(
+        lambda: defaultdict(int),
+    )
+    totals: defaultdict[str, int] = defaultdict(int)
 
     # Track which nodes have been counted for each user
-    counted_nodes = defaultdict(set)
+    counted_nodes: defaultdict[str, set[str]] = defaultdict(set)
 
     for s in output:
         if s.oversubscribe in ["NO", "USER"]:
@@ -80,19 +106,22 @@ def process_data(output: list[SlurmJob], cores_or_nodes: str):
     return data, total_partition, totals
 
 
-def summarize_status(d):
+def summarize_status(d: dict[str, int]) -> str:
+    """Summarize status dictionary into a readable string."""
     return " / ".join([f"{status}={n}" for status, n in d.items()])
 
 
-def combine_statuses(d):
-    tot = defaultdict(int)
+def combine_statuses(d: dict[str, Any]) -> dict[str, int]:
+    """Combine multiple status dictionaries into one."""
+    tot: defaultdict[str, int] = defaultdict(int)
     for dct in d.values():
         for status, n in dct.items():
             tot[status] += n
     return dict(tot)
 
 
-def get_max_lengths(rows):
+def get_max_lengths(rows: list[list[str]]) -> list[int]:
+    """Get maximum lengths for each column in a list of rows."""
     max_lengths = [0] * len(rows[0])
     for row in rows:
         for i, entry in enumerate(row):
@@ -100,7 +129,8 @@ def get_max_lengths(rows):
     return max_lengths
 
 
-def get_ncores(partition):
+def get_ncores(partition: str) -> int:
+    """Extract number of cores from partition name."""
     numbers = re.findall(r"\d+", partition)
     try:
         return int(numbers[0])
@@ -109,6 +139,7 @@ def get_ncores(partition):
 
 
 def main() -> None:
+    """Run the main slurm-usage command."""
     output = squeue_output()
     me = getuser()
     for which in ["cores", "nodes"]:
@@ -123,9 +154,7 @@ def main() -> None:
 
         for user, _stats in sorted(data.items()):
             kw = {"style": "bold italic"} if user == me else {}
-            partition_stats = [
-                summarize_status(_stats[p]) if p in _stats else "-" for p in partitions
-            ]
+            partition_stats = [summarize_status(_stats[p]) if p in _stats else "-" for p in partitions]
             table.add_row(
                 user,
                 *partition_stats,

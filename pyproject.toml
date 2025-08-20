@@ -8,7 +8,7 @@ description = "Command to list the current cluster usage per user."
 dynamic = ["version"]
 authors = [{ name = "Bas Nijholt", email = "bas@nijho.lt" }]
 dependencies = ["rich"]
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 license = { text = "MIT" }
 
 [project.readme]
@@ -50,7 +50,7 @@ line_length = 88
 
 [tool.ruff]
 line-length = 150
-target-version = "py37"
+target-version = "py38"
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -78,7 +78,7 @@ ignore = [
 max-complexity = 18
 
 [tool.mypy]
-python_version = "3.7"
+python_version = "3.8"
 
 [tool.versioningit]
 
