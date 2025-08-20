@@ -1,0 +1,22 @@
+# Example configuration file for slurm-usage
+# Place this file at ~/.config/slurm-usage/config.yaml
+
+groups:
+  applications:
+    - alice
+    - bob
+  control:
+    - charlie
+    - david
+  physical:
+    - eve
+    - frank
+  quantum:
+    - grace
+    - henry
+  software:
+    - isabel
+    - jack
+  interns:
+    - karen
+    - larry

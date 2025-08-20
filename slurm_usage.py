@@ -6,7 +6,7 @@ Collects and analyzes SLURM job efficiency metrics and displays current queue st
 Part of the [slurm-usage](https://github.com/basnijholt/slurm-usage) library.
 """
 # /// script
-# requires-python = ">=3.12"
+# requires-python = ">=3.10"
 # dependencies = [
 #     "typer>=0.9",
 #     "pydantic>=2.0",
@@ -45,7 +45,9 @@ UTC = timezone.utc
 app = typer.Typer(help="SLURM Job Monitor - Collect and analyze job efficiency metrics")
 console = Console()
 
-DATA_DIR = Path(__file__).parent / "data"
+# Use different data directory when using mock data
+USE_MOCK_DATA = os.environ.get("SLURM_USE_MOCK_DATA")
+DATA_DIR = Path(__file__).parent / "tests" / "mock_data" if USE_MOCK_DATA else Path(__file__).parent / "data"
 
 
 @app.callback(invoke_without_command=True)
@@ -108,9 +110,9 @@ def _load_config_file() -> dict[str, Any]:
     """Load configuration from standard locations.
 
     Searches for configuration in the following order:
-    1. $XDG_CONFIG_HOME/slurm-monitor/config.yaml
-    2. ~/.config/slurm-monitor/config.yaml
-    3. /etc/slurm-monitor/config.yaml
+    1. $XDG_CONFIG_HOME/slurm-usage/config.yaml
+    2. ~/.config/slurm-usage/config.yaml
+    3. /etc/slurm-usage/config.yaml
 
     Returns an empty dict if no configuration file is found.
     """
@@ -119,12 +121,12 @@ def _load_config_file() -> dict[str, Any]:
     # XDG_CONFIG_HOME or default ~/.config
     xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
     if xdg_config_home:
-        config_paths.append(Path(xdg_config_home) / "slurm-monitor" / "config.yaml")
+        config_paths.append(Path(xdg_config_home) / "slurm-usage" / "config.yaml")
     else:
-        config_paths.append(Path.home() / ".config" / "slurm-monitor" / "config.yaml")
+        config_paths.append(Path.home() / ".config" / "slurm-usage" / "config.yaml")
 
     # Global system configuration
-    config_paths.append(Path("/etc/slurm-monitor/config.yaml"))
+    config_paths.append(Path("/etc/slurm-usage/config.yaml"))
 
     for config_path in config_paths:
         if config_path.exists():
@@ -199,6 +201,155 @@ class Config(BaseModel):
         """Ensure all data directories exist."""
         self.raw_data_dir.mkdir(parents=True, exist_ok=True)
         self.processed_data_dir.mkdir(parents=True, exist_ok=True)
+
+
+# ============================================================================
+# SLURM Commands
+# ============================================================================
+
+
+class CommandResult(NamedTuple):
+    """Result from a command execution."""
+
+    stdout: str
+    stderr: str
+    returncode: int
+    command: str = ""  # The command that was executed
+
+
+def _run(cmd: str | list[str], *, shell: bool = False) -> CommandResult:
+    """Run a command or return mock data if configured."""
+    cmd_str = cmd if isinstance(cmd, str) else " ".join(cmd)
+
+    if USE_MOCK_DATA:
+        snapshot_dir = Path(__file__).parent / "tests" / "snapshots"
+        command_map_file = snapshot_dir / "command_map.json"
+        with command_map_file.open() as f:
+            command_map = json.load(f)
+
+        # Try exact matching first
+        if cmd_str in command_map:
+            file_prefix = command_map[cmd_str]
+        # For sacct commands, try to map dates to day indices
+        elif cmd_str.startswith("sacct -a -S "):
+            import re
+
+            # Extract the date from the command
+            date_match = re.search(r"-S (\d{4}-\d{2}-\d{2})T", cmd_str)
+            if date_match:
+                requested_date = date_match.group(1)
+
+                # Build a date-to-day mapping from existing commands
+                date_to_day = {}
+                for existing_cmd, prefix in command_map.items():
+                    if existing_cmd.startswith("sacct -a -S ") and "sacct_day_" in prefix:
+                        existing_date_match = re.search(r"-S (\d{4}-\d{2}-\d{2})T", existing_cmd)
+                        if existing_date_match:
+                            existing_date = existing_date_match.group(1)
+                            date_to_day[existing_date] = prefix
+
+                # Try to use an existing snapshot for this date
+                if requested_date in date_to_day:
+                    file_prefix = date_to_day[requested_date]
+                else:
+                    # If exact date not found, could use a default or return empty
+                    return CommandResult("", "", 0, cmd_str)
+            else:
+                return CommandResult("", "", 1, cmd_str)
+        else:
+            # Command not found in map
+            return CommandResult("", "", 1, cmd_str)
+
+        stdout_file = snapshot_dir / f"{file_prefix}_output.txt"
+        stdout = stdout_file.read_text()
+        rc_file = snapshot_dir / f"{file_prefix}_returncode.txt"
+        err_file = snapshot_dir / f"{file_prefix}_stderr.txt"
+        returncode = int(rc_file.read_text().strip())
+        stderr = err_file.read_text()
+        return CommandResult(stdout, stderr, returncode, cmd_str)
+
+    # Run the actual command
+    result = subprocess.run(cmd, shell=shell, capture_output=True, text=True, check=False)  # noqa: S603
+    return CommandResult(result.stdout, result.stderr, result.returncode, cmd_str)
+
+
+def run_sacct(
+    date_str: str,
+    fields: list[str],
+) -> CommandResult:
+    """Run sacct command to get job accounting data for a specific date.
+
+    Args:
+        date_str: Date string in format YYYY-MM-DD
+        fields: List of field names to retrieve
+
+    Returns:
+        CommandResult with stdout, stderr, and return code
+
+    """
+    start_date = f"{date_str}T00:00:00"
+    end_date = f"{date_str}T23:59:59"
+    fields_str = ",".join(fields)
+    cmd = f"sacct -a -S {start_date} -E {end_date} --format={fields_str} -P -n"
+    return _run(cmd, shell=True)  # noqa: S604
+
+
+def run_squeue() -> CommandResult:
+    """Run squeue to get current queue status.
+
+    Returns:
+        CommandResult with stdout, stderr, and return code
+
+    """
+    cmd = ["squeue", "-ro", "%u/%t/%D/%P/%C/%N/%h"]
+    return _run(cmd)
+
+
+def run_scontrol_show_node(node_name: str) -> CommandResult:
+    """Run scontrol to get node information.
+
+    Args:
+        node_name: Name of the node to query
+
+    Returns:
+        CommandResult with stdout, stderr, and return code
+
+    """
+    cmd = ["scontrol", "show", "node", node_name]
+    return _run(cmd)
+
+
+def run_sinfo_cpus() -> CommandResult:
+    """Run sinfo to get CPU information for all nodes.
+
+    Returns:
+        CommandResult with stdout, stderr, and return code
+
+    """
+    cmd = "sinfo -h -N --format='%N,%c'"
+    return _run(cmd, shell=True)  # noqa: S604
+
+
+def run_sinfo_gpus() -> CommandResult:
+    """Run sinfo to get GPU (GRES) information for all nodes.
+
+    Returns:
+        CommandResult with stdout, stderr, and return code
+
+    """
+    cmd = "sinfo -h -N --format='%N,%G'"
+    return _run(cmd, shell=True)  # noqa: S604
+
+
+def run_sacct_version() -> CommandResult:
+    """Run sacct --version to check if sacct is available.
+
+    Returns:
+        CommandResult with stdout, stderr, and return code
+
+    """
+    cmd = "sacct --version"
+    return _run(cmd, shell=True)  # noqa: S604
 
 
 # ============================================================================
@@ -688,17 +839,15 @@ class SlurmJob(NamedTuple):
 
 def squeue_output() -> list[SlurmJob]:
     """Get current SLURM queue status."""
-    cmd = ["squeue", "-ro", "%u/%t/%D/%P/%C/%N/%h"]
     # Get the output and skip the header
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
+    result = run_squeue()
     output = result.stdout.split("\n")[1:]
     return [SlurmJob.from_line(line) for line in output if line.strip()]
 
 
 def get_total_cores(node_name: str) -> int:
     """Get total number of cores for a given node."""
-    cmd = ["scontrol", "show", "node", node_name]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
+    result = run_scontrol_show_node(node_name)
     output = result.stdout
 
     # Find the line with "CPUTot" which indicates the total number of CPUs (cores)
@@ -734,9 +883,8 @@ def process_data(
         if s.oversubscribe in ["NO", "USER"]:
             if s.node not in counted_nodes[s.user]:
                 n = get_total_cores(s.node)  # Get total cores in the node
-                counted_nodes[s.user].add(
-                    s.node,
-                )  # Mark this node as counted for this user
+                # Mark this node as counted for this user
+                counted_nodes[s.user].add(s.node)
             else:
                 continue  # Skip this job to prevent double-counting
         else:
@@ -968,17 +1116,9 @@ def _fetch_raw_records_from_slurm(date_str: str) -> list[RawJobRecord]:
 
     """
     fields = RawJobRecord.get_field_names()
-    fields_str = ",".join(fields)
 
     # Query jobs that started or were submitted on this date
-    start_date = f"{date_str}T00:00:00"
-    end_date = f"{date_str}T23:59:59"
-
-    cmd = f"""sacct -a -S {start_date} -E {end_date} \
-        --format={fields_str} \
-        -P -n"""
-
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, check=False)
+    result = run_sacct(date_str, fields)
 
     if result.returncode != 0:
         console.print(f"[red]Error fetching data for {date_str}: {result.stderr}[/red]")
@@ -1273,8 +1413,7 @@ def _get_node_info_from_slurm() -> dict[str, dict[str, int]]:  # noqa: PLR0912
     try:
         # Get CPU information for all nodes
         # Format: NODELIST:20,CPUS:5
-        cmd = "sinfo -h -N --format='%N,%c'"
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, check=False)
+        result = run_sinfo_cpus()
 
         if result.returncode == 0:
             for line in result.stdout.strip().split("\n"):
@@ -1290,8 +1429,7 @@ def _get_node_info_from_slurm() -> dict[str, dict[str, int]]:  # noqa: PLR0912
 
         # Get GPU information using GRES
         # Format: NODELIST:20,GRES:30
-        cmd = "sinfo -h -N --format='%N,%G'"
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, check=False)
+        result = run_sinfo_gpus()
 
         if result.returncode == 0:
             for line in result.stdout.strip().split("\n"):
@@ -1944,9 +2082,10 @@ def collect(  # noqa: PLR0912, PLR0915
     n_parallel: Annotated[int, typer.Option("--n-parallel", "-n", help="Number of parallel workers for date-based collection")] = 4,
 ) -> None:
     """Collect job data from SLURM using parallel date-based queries."""
+    mode_text = "[yellow]MOCK DATA MODE[/yellow]\n" if USE_MOCK_DATA else ""
     console.print(
         Panel.fit(
-            f"[bold cyan]SLURM Job Monitor[/bold cyan]\nParallel collection with {n_parallel} workers",
+            f"[bold cyan]SLURM Job Monitor[/bold cyan]\n{mode_text}Parallel collection with {n_parallel} workers",
             border_style="cyan",
         ),
     )
@@ -1958,6 +2097,9 @@ def collect(  # noqa: PLR0912, PLR0915
     # Create config and ensure directories exist
     config = Config(data_dir=data_dir)
     config.ensure_directories_exist()
+
+    if USE_MOCK_DATA:
+        console.print(f"[yellow]Using mock data directory: {config.data_dir}[/yellow]")
 
     # Load or create completion tracker
     tracker_file = config.data_dir / ".date_completion_tracker.json"
@@ -2271,7 +2413,7 @@ def test() -> None:
 
     # Test sacct access
     try:
-        result = subprocess.run("sacct --version", shell=True, capture_output=True, text=True, check=False)  # noqa: S607
+        result = run_sacct_version()
         if result.returncode == 0:
             console.print("[green]✓ sacct is accessible[/green]")
         else:

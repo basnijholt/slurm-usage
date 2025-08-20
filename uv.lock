@@ -180,6 +180,15 @@ wheels = [
 ]
 
 [[package]]
+name = "markdown-code-runner"
+version = "2.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1e/c2/9b49658a71b010055606faa2a30e6f40b2ad7b8c81e2f5eb03ca081a0d86/markdown_code_runner-2.3.0.tar.gz", hash = "sha256:adbd60b3760cf7f37c1ad07e65ce6b62c92227e9e7e8db8fc1ed889ca30465cc", size = 18304, upload-time = "2025-07-22T06:52:23.258Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9c/0e/334a46a50ffa3d9009352d5d0265518f3d87acdd0ca89b6386071f5206eb/markdown_code_runner-2.3.0-py3-none-any.whl", hash = "sha256:d6cdb7aba968fbe673a592f7f92efa56ced49dc8b1c009568b7cb4001d4cf2fd", size = 12191, upload-time = "2025-07-22T06:52:22.523Z" },
+]
+
+[[package]]
 name = "markdown-it-py"
 version = "4.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -496,6 +505,7 @@ test = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "markdown-code-runner" },
     { name = "pytest" },
     { name = "pytest-cov" },
 ]
@@ -516,6 +526,7 @@ provides-extras = ["docs", "test"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "markdown-code-runner", specifier = ">=2.3.0" },
     { name = "pytest", specifier = ">=7.4.4" },
     { name = "pytest-cov", specifier = ">=4.1.0" },
 ]

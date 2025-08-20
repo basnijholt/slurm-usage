@@ -105,6 +105,7 @@ default-tag = "0.0.0"
 
 [dependency-groups]
 dev = [
+    "markdown-code-runner>=2.3.0",
     "pytest>=7.4.4",
     "pytest-cov>=4.1.0",
 ]
