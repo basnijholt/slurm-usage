@@ -18,6 +18,38 @@ SLURM's accounting database purges detailed job metrics (CPU usage, memory usage
 - ⏰ **Cron-ready** - designed for automated daily collection
 - 🎯 **Intelligent re-collection** - only re-fetches incomplete job states
 
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [What It Collects](#what-it-collects)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [CLI Commands](#cli-commands)
+  - [Command Options](#command-options)
+    - [`collect` - Gather job data from SLURM](#collect---gather-job-data-from-slurm)
+    - [`analyze` - Analyze collected data](#analyze---analyze-collected-data)
+    - [`status` - Show system status](#status---show-system-status)
+    - [`test` - Test system configuration](#test---test-system-configuration)
+- [Output Structure](#output-structure)
+  - [Data Organization](#data-organization)
+  - [Sample Analysis Output](#sample-analysis-output)
+- [Smart Re-collection](#smart-re-collection)
+  - [Tracked Incomplete States](#tracked-incomplete-states)
+- [Group Configuration](#group-configuration)
+- [Automated Collection](#automated-collection)
+  - [Using Cron](#using-cron)
+  - [Using Systemd Timer](#using-systemd-timer)
+- [Data Schema](#data-schema)
+  - [ProcessedJob Model](#processedjob-model)
+- [Performance Optimizations](#performance-optimizations)
+- [Important Notes](#important-notes)
+- [Post-Processing with Polars](#post-processing-with-polars)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 ## What It Collects
 
 For each job:
