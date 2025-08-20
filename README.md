@@ -1,3 +1,23 @@
+# SLURM Job Efficiency Monitor
+
+A high-performance monitoring system that collects and analyzes SLURM job efficiency metrics, optimized for large-scale HPC environments.
+
+## Purpose
+
+SLURM's accounting database purges detailed job metrics (CPU usage, memory usage) after 30 days. This tool captures and preserves that data in efficient Parquet format for long-term analysis of resource utilization patterns.
+
+## Key Features
+
+- 📊 **Captures comprehensive efficiency metrics** from all job states
+- 💾 **Efficient Parquet storage** - columnar format optimized for analytics
+- 🔄 **Smart incremental processing** - tracks completed dates to minimize re-processing
+- 📈 **Rich visualizations** - bar charts for resource usage, efficiency, and node utilization
+- 👥 **Group-based analytics** - track usage by research groups/teams
+- 🖥️ **Node utilization tracking** - analyze per-node CPU and GPU usage
+- ⚡ **Parallel collection** - multi-threaded data collection by default
+- ⏰ **Cron-ready** - designed for automated daily collection
+- 🎯 **Intelligent re-collection** - only re-fetches incomplete job states
+
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
@@ -32,26 +52,6 @@
   - [License](#license)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
-
-# SLURM Job Efficiency Monitor
-
-A high-performance monitoring system that collects and analyzes SLURM job efficiency metrics, optimized for large-scale HPC environments.
-
-## Purpose
-
-SLURM's accounting database purges detailed job metrics (CPU usage, memory usage) after 30 days. This tool captures and preserves that data in efficient Parquet format for long-term analysis of resource utilization patterns.
-
-## Key Features
-
-- 📊 **Captures comprehensive efficiency metrics** from all job states
-- 💾 **Efficient Parquet storage** - columnar format optimized for analytics
-- 🔄 **Smart incremental processing** - tracks completed dates to minimize re-processing
-- 📈 **Rich visualizations** - bar charts for resource usage, efficiency, and node utilization
-- 👥 **Group-based analytics** - track usage by research groups/teams
-- 🖥️ **Node utilization tracking** - analyze per-node CPU and GPU usage
-- ⚡ **Parallel collection** - multi-threaded data collection by default
-- ⏰ **Cron-ready** - designed for automated daily collection
-- 🎯 **Intelligent re-collection** - only re-fetches incomplete job states
 
 ## What It Collects
 
