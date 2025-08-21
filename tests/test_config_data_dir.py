@@ -22,10 +22,12 @@ class TestConfigDataDir:
     """Test data directory configuration and auto-determination."""
 
     def test_config_data_dir_none_default(self) -> None:
-        """Test that data_dir defaults to current directory when not specified."""
-        config = slurm_usage.Config.create()
-        # In mock mode, should use mock_data directory
-        assert "mock_data" in str(config.data_dir)
+        """Test that data_dir defaults to ./data when not specified."""
+        with patch("slurm_usage._load_config_file") as mock_load:
+            mock_load.return_value = ({}, None)  # No config file
+            config = slurm_usage.Config.create()
+            # Should use default ./data directory
+            assert config.data_dir == Path("data")
 
     def test_config_explicit_data_dir(self) -> None:
         """Test explicit data_dir specification."""
@@ -34,13 +36,12 @@ class TestConfigDataDir:
         assert config.data_dir == custom_dir
 
     def test_config_default_data_dir(self) -> None:
-        """Test that default data_dir is current directory when no config file."""
-        # Temporarily disable mock mode to test real logic
-        with patch("slurm_usage.USE_MOCK_DATA", False), patch("slurm_usage._load_config_file") as mock_load:  # noqa: FBT003
+        """Test that default data_dir is ./data when no config file."""
+        with patch("slurm_usage._load_config_file") as mock_load:
             mock_load.return_value = ({}, None)
             config = slurm_usage.Config.create()
-            # Should use current directory when no config file
-            assert config.data_dir == Path()
+            # Should use default ./data directory
+            assert config.data_dir == Path("data")
 
     def test_config_data_dir_from_file(self, tmp_path: Path) -> None:
         """Test loading data_dir from config file."""
@@ -60,7 +61,7 @@ class TestConfigDataDir:
             assert config.data_dir == Path("/custom/shared/data")
 
     def test_config_data_dir_null_in_file(self, tmp_path: Path) -> None:
-        """Test that null/None data_dir in config file uses config-adjacent directory."""
+        """Test that null/None data_dir in config file uses default."""
         config_dir = tmp_path / ".config" / "slurm-usage"
         config_dir.mkdir(parents=True)
         config_file = config_dir / "config.yaml"
@@ -75,26 +76,20 @@ class TestConfigDataDir:
         # Mock the config loading to use our test file
         with patch("slurm_usage._load_config_file") as mock_load:
             mock_load.return_value = (config_data, config_file)
+            config = slurm_usage.Config.create()
+            # Should use default ./data directory
+            assert config.data_dir == Path("data")
 
-            with patch("slurm_usage.USE_MOCK_DATA", False):  # noqa: FBT003
-                config = slurm_usage.Config.create()
-                # Should use directory adjacent to config file
-                expected = config_file.parent / "data"
-                assert config.data_dir == expected
-
-    def test_config_no_data_dir_uses_config_adjacent(self) -> None:
-        """Test that when config exists but no data_dir specified, use config adjacent data."""
+    def test_config_no_data_dir_uses_default(self) -> None:
+        """Test that when config exists but no data_dir specified, use default."""
         config_path = Path("/etc/slurm-usage/config.yaml")
 
         with patch("slurm_usage._load_config_file") as mock_load:
             # Config file found, but no data_dir specified
             mock_load.return_value = ({"groups": {"team1": ["alice"]}}, config_path)
-
-            with patch("slurm_usage.USE_MOCK_DATA", False):  # noqa: FBT003
-                config = slurm_usage.Config.create()
-                # Should use data directory adjacent to config file
-                expected = config_path.parent / "data"
-                assert config.data_dir == expected
+            config = slurm_usage.Config.create()
+            # Should use default ./data directory
+            assert config.data_dir == Path("data")
 
     def test_cli_commands_accept_data_dir(self) -> None:
         """Test that CLI commands properly handle data_dir parameter."""

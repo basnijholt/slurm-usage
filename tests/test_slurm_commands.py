@@ -144,12 +144,12 @@ class TestMockDataSystem:
         assert os.environ.get("SLURM_USE_MOCK_DATA") == "1"
         assert slurm_usage.USE_MOCK_DATA
 
-    def test_data_directory_override(self) -> None:
-        """Test that data directory is overridden in mock mode."""
-        expected = Path(__file__).parent.parent / "tests" / "mock_data"
-        # Create a Config instance and check its data_dir
-        config = slurm_usage.Config.create()
-        assert expected == config.data_dir
+    def test_data_directory_explicit(self) -> None:
+        """Test that data directory can be explicitly set for mock data."""
+        mock_data_dir = Path(__file__).parent.parent / "tests" / "mock_data"
+        # Create a Config instance with explicit mock data directory
+        config = slurm_usage.Config.create(data_dir=mock_data_dir)
+        assert mock_data_dir == config.data_dir
 
     def test_exact_command_matching(self) -> None:
         """Test that exact command matching works."""

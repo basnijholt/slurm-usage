@@ -43,7 +43,7 @@ class TestCLICommands:
         mock_data_dir = Path(slurm_usage.__file__).parent / "tests" / "mock_data"
         mock_data_dir.mkdir(parents=True, exist_ok=True)
 
-        result = runner.invoke(slurm_usage.app, ["status"])
+        result = runner.invoke(slurm_usage.app, ["status", "--data-dir", str(mock_data_dir)])
         assert result.exit_code == 0
         assert "SLURM Job Monitor Status" in result.stdout
         # The output should contain either "Data Directory" (if dir exists) or "No data directory" (if not)
@@ -74,18 +74,20 @@ class TestCLICommands:
     def test_collect_command_with_summary(self, mock_datetime_now: MagicMock) -> None:  # noqa: ARG002
         """Test collect command with summary."""
         # Use --days 7 to ensure we get data from our 8-day snapshot range
-        result = runner.invoke(slurm_usage.app, ["collect", "--days", "7"])
+        mock_data_dir = Path(slurm_usage.__file__).parent / "tests" / "mock_data"
+        result = runner.invoke(slurm_usage.app, ["collect", "--days", "7", "--data-dir", str(mock_data_dir)])
         assert result.exit_code == 0
         assert "Resource Usage by User" in result.stdout
         assert "CPU Hours" in result.stdout
 
     def test_analyze_command(self, mock_datetime_now: MagicMock) -> None:  # noqa: ARG002
         """Test analyze command."""
+        mock_data_dir = Path(slurm_usage.__file__).parent / "tests" / "mock_data"
         # First collect some data that exists in our mock data (days 3-7 ago)
-        runner.invoke(slurm_usage.app, ["collect", "--days", "3", "--no-summary"])
+        runner.invoke(slurm_usage.app, ["collect", "--days", "3", "--no-summary", "--data-dir", str(mock_data_dir)])
 
         # Then analyze it
-        result = runner.invoke(slurm_usage.app, ["analyze", "--days", "7"])
+        result = runner.invoke(slurm_usage.app, ["analyze", "--days", "7", "--data-dir", str(mock_data_dir)])
         assert result.exit_code == 0
         assert "Job Efficiency Analysis" in result.stdout
         assert "Resource Usage" in result.stdout
@@ -96,10 +98,11 @@ class TestConfig:
 
     def test_config_default_directories(self) -> None:
         """Test default configuration directories."""
-        config = slurm_usage.Config.create()
+        # For tests, explicitly use mock_data directory
+        mock_data_dir = Path(slurm_usage.__file__).parent / "tests" / "mock_data"
+        config = slurm_usage.Config.create(data_dir=mock_data_dir)
 
-        # In mock mode, should use test directory
-        assert "mock_data" in str(config.data_dir)
+        assert config.data_dir == mock_data_dir
         assert config.raw_data_dir == config.data_dir / "raw"
         assert config.processed_data_dir == config.data_dir / "processed"
 
@@ -112,9 +115,10 @@ class TestConfig:
         assert config.get_user_group("charlie") == "group2"
         assert config.get_user_group("unknown") == "ungrouped"
 
-    def test_config_ensure_directories(self) -> None:
+    def test_config_ensure_directories(self, tmp_path: Path) -> None:
         """Test directory creation."""
-        config = slurm_usage.Config.create()
+        test_data_dir = tmp_path / "test_data"
+        config = slurm_usage.Config.create(data_dir=test_data_dir)
         config.ensure_directories_exist()
 
         assert config.raw_data_dir.exists()

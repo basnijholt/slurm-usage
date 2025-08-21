@@ -203,22 +203,10 @@ class Config(BaseModel):
         # Determine data_dir with priority:
         # 1. Explicit parameter
         # 2. Config file value
-        # 3. Test mode override
-        # 4. Config-adjacent directory
-        # 5. Current directory
+        # 3. Default: ./data (current directory)
         if data_dir is None:
-            # Check config file
-            if "data_dir" in file_config and file_config["data_dir"] is not None:
-                data_dir = Path(file_config["data_dir"])
-            # Use test mode directory if in test mode and no explicit config
-            elif USE_MOCK_DATA:
-                data_dir = Path(__file__).parent / "tests" / "mock_data"
-            # Use config-adjacent directory if config file exists
-            elif config_path:
-                data_dir = config_path.parent / "data"
-            # Default to current directory
-            else:
-                data_dir = Path()
+            # Check config file, otherwise use default ./data
+            data_dir = Path(file_config["data_dir"]) if "data_dir" in file_config and file_config["data_dir"] is not None else Path("data")
 
         return cls(
             data_dir=data_dir,
