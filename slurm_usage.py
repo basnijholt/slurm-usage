@@ -38,6 +38,7 @@ from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
+from rich.rule import Rule
 from rich.table import Table
 
 UTC = timezone.utc
@@ -1796,7 +1797,7 @@ def _create_node_usage_stats(df: pl.DataFrame) -> None:
     if df.is_empty() or "node_list" not in df.columns:
         return
 
-    console.print("\n[bold cyan]═══ Node Usage Analysis ═══[/bold cyan]\n")
+    console.print(Rule("Node Usage Analysis", style="bold cyan"))
 
     # Step 1: Extract node usage data from jobs
     node_usage_data = _extract_node_usage_data(df)
@@ -1894,7 +1895,7 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
     )
 
     # Display per-user resource usage
-    console.print("\n[bold cyan]═══ Resource Usage by User ═══[/bold cyan]\n")
+    console.print(Rule("Resource Usage by User", style="bold cyan"))
 
     user_table = Table(title="Top 15 Users by CPU Hours", box=box.ROUNDED)
     user_table.add_column("User", style="cyan")
@@ -2005,7 +2006,7 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
     groups = group_stats["group"].to_list()
     if len(groups) > 1 or (len(groups) == 1 and groups[0] != "ungrouped"):
         # Display per-group resource usage
-        console.print("\n[bold cyan]═══ Resource Usage by Group ═══[/bold cyan]\n")
+        console.print(Rule("Resource Usage by Group", style="bold cyan"))
 
         group_table = Table(title="Research Group Statistics", box=box.ROUNDED)
         group_table.add_column("Group", style="magenta")
@@ -2065,7 +2066,7 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
     completed = df.filter(pl.col("state") == "COMPLETED")
 
     if not completed.is_empty():
-        console.print("\n[bold cyan]═══ Efficiency Analysis (Completed Jobs) ═══[/bold cyan]\n")
+        console.print(Rule("Efficiency Analysis (Completed Jobs)", style="bold cyan"))
 
         # Calculate stats in one pass
         stats = completed.select(
@@ -2132,7 +2133,7 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
             console.print(waste_table)
 
     # Display cluster-wide summary statistics
-    console.print("\n[bold cyan]═══ Cluster-Wide Summary ═══[/bold cyan]\n")
+    console.print(Rule("Cluster-Wide Summary", style="bold cyan"))
 
     cluster_summary = Table(title="Total Resource Usage", box=box.ROUNDED)
     cluster_summary.add_column("Metric", style="cyan")
@@ -2204,7 +2205,7 @@ def _create_daily_usage_chart(df: pl.DataFrame) -> None:
     if daily_stats.is_empty():
         return
 
-    console.print("\n[bold cyan]═══ Daily Resource Usage ═══[/bold cyan]\n")
+    console.print(Rule("Daily Resource Usage", style="bold cyan"))
 
     # Display daily usage table
     daily_table = Table(title="Resource Usage by Day", box=box.ROUNDED)
