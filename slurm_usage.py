@@ -157,9 +157,7 @@ def _load_config_file() -> tuple[dict[str, Any], Path | None]:
             if config:
                 console.print(f"[green]Loaded configuration from {config_path}[/green]")
                 return config, config_path
-            console.print(
-                f"[yellow]Warning: Empty configuration file at {config_path}[/yellow]",
-            )
+            console.print(f"[yellow]Warning: Empty configuration file at {config_path}[/yellow]")
             return {}, config_path
     except (OSError, yaml.YAMLError) as e:
         console.print(f"[yellow]Warning: Failed to load {config_path}: {e}[/yellow]")
@@ -1158,10 +1156,7 @@ def _load_recent_data(
 
     # Deduplicate by job_id if processing processed data
     if data_type == "processed" and "job_id" in combined.columns:
-        return combined.sort("processed_date", descending=True).unique(
-            subset=["job_id"],
-            keep="first",
-        )
+        return combined.sort("processed_date", descending=True).unique(subset=["job_id"], keep="first")
     if data_type == "raw" and "JobIDRaw" in combined.columns:
         # Deduplicate raw data by JobIDRaw
         return combined.unique(subset=["JobIDRaw"], keep="last")
@@ -1835,16 +1830,19 @@ def _create_node_usage_stats(df: pl.DataFrame) -> None:
 # ============================================================================
 
 
-def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PLR0915
-    """Create and display comprehensive resource usage statistics.
+def _prepare_dataframe_for_analysis(df: pl.DataFrame, config: Config) -> pl.DataFrame:
+    """Prepare DataFrame with additional columns needed for analysis.
 
     Args:
         df: DataFrame with job data
         config: Config object for group mappings
 
+    Returns:
+        DataFrame with group, reserved resource, and wait time columns added
+
     """
     if df.is_empty():
-        return
+        return df
 
     # Check which columns are available
     has_reserved_cols = all(col in df.columns for col in ["cpu_hours_reserved", "memory_gb_hours_reserved", "gpu_hours_reserved"])
@@ -1856,10 +1854,7 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
 
     # Create mapping DataFrame and join
     mapping_df = pl.DataFrame(
-        {
-            "user": list(user_group_mapping.keys()),
-            "group": list(user_group_mapping.values()),
-        },
+        {"user": list(user_group_mapping.keys()), "group": list(user_group_mapping.values())},
     )
 
     df = df.join(mapping_df, on="user", how="left")
@@ -1868,27 +1863,28 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
     if not has_reserved_cols:
         df = df.with_columns(
             [
-                (pl.col("elapsed_seconds") * pl.col("alloc_cpus") / 3600).alias(
-                    "cpu_hours_reserved",
-                ),
-                (pl.col("req_mem_mb") * pl.col("elapsed_seconds") / (1024 * 3600)).alias(
-                    "memory_gb_hours_reserved",
-                ),
+                (pl.col("elapsed_seconds") * pl.col("alloc_cpus") / 3600).alias("cpu_hours_reserved"),
+                (pl.col("req_mem_mb") * pl.col("elapsed_seconds") / (1024 * 3600)).alias("memory_gb_hours_reserved"),
                 pl.lit(0.0).alias("gpu_hours_reserved"),  # No GPU data in old files
             ],
         )
 
     # Calculate wait time (in seconds) for jobs that have both submit and start times
-    # Now working with datetime objects directly
-    df = df.with_columns(
+    return df.with_columns(
         pl.when((pl.col("submit_time").is_not_null()) & (pl.col("start_time").is_not_null()))
-        .then(
-            (pl.col("start_time") - pl.col("submit_time")).dt.total_seconds(),
-        )
+        .then((pl.col("start_time") - pl.col("submit_time")).dt.total_seconds())
         .otherwise(None)
         .alias("wait_seconds"),
     )
 
+
+def _create_user_statistics_section(df: pl.DataFrame) -> None:
+    """Create and display user statistics table and charts.
+
+    Args:
+        df: Prepared DataFrame with user and resource data
+
+    """
     # Calculate per-user statistics
     user_stats = (
         df.group_by("user")
@@ -2003,6 +1999,14 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
             item_type="users",
         )
 
+
+def _create_group_statistics_section(df: pl.DataFrame) -> None:
+    """Create and display group statistics table and charts.
+
+    Args:
+        df: Prepared DataFrame with group and resource data
+
+    """
     # Calculate per-group statistics
     group_stats = (
         df.group_by("group")
@@ -2077,9 +2081,14 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
                 item_type="groups",
             )
 
-    # Analyze node usage
-    _create_node_usage_stats(df)
 
+def _create_efficiency_analysis_section(df: pl.DataFrame) -> None:
+    """Create and display efficiency analysis for completed jobs.
+
+    Args:
+        df: DataFrame with job data
+
+    """
     # Show efficiency summary for completed jobs
     completed = df.filter(pl.col("state") == "COMPLETED")
 
@@ -2150,6 +2159,14 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
 
             console.print(waste_table)
 
+
+def _create_cluster_summary_section(df: pl.DataFrame) -> None:
+    """Create and display cluster-wide summary statistics.
+
+    Args:
+        df: DataFrame with job data
+
+    """
     # Display cluster-wide summary statistics
     console.print(Panel.fit("Cluster-Wide Summary", style="bold cyan", box=box.DOUBLE_EDGE))
 
@@ -2182,6 +2199,25 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
     cluster_summary.add_row("Top Job States", states_str)
 
     console.print(cluster_summary)
+
+
+def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:
+    """Create and display comprehensive resource usage statistics.
+
+    Args:
+        df: DataFrame with job data
+        config: Config object for group mappings
+
+    """
+    if df.is_empty():
+        return
+
+    prepared_df = _prepare_dataframe_for_analysis(df, config)
+    _create_user_statistics_section(prepared_df)
+    _create_group_statistics_section(prepared_df)
+    _create_node_usage_stats(prepared_df)
+    _create_efficiency_analysis_section(prepared_df)
+    _create_cluster_summary_section(prepared_df)
 
 
 def _create_daily_usage_chart(df: pl.DataFrame) -> None:
@@ -2381,10 +2417,7 @@ def collect(  # noqa: PLR0912, PLR0915
                             # Merge: keep the most recent version of each job
                             # This updates job states for existing jobs and adds new ones
                             merged_df = pl.concat([existing_df, new_df])
-                            merged_df = merged_df.sort("processed_date", descending=True).unique(
-                                subset=["job_id"],
-                                keep="first",
-                            )
+                            merged_df = merged_df.sort("processed_date", descending=True).unique(subset=["job_id"], keep="first")
                             merged_df.write_parquet(processed_file)
                             total_processed += len(new_df) - len(existing_df) + len(merged_df)
                         else:
