@@ -49,7 +49,6 @@ SLURM's accounting database purges detailed job metrics (CPU usage, memory usage
   - [Data Directory](#data-directory)
 - [Automated Collection](#automated-collection)
   - [Using Cron](#using-cron)
-  - [Using Systemd Timer](#using-systemd-timer)
 - [Data Schema](#data-schema)
   - [ProcessedJob Model](#processedjob-model)
 - [Performance Optimizations](#performance-optimizations)
@@ -362,43 +361,6 @@ crontab -e
 
 # Or if running from source:
 0 2 * * * /path/to/slurm-usage/slurm_usage.py collect --days 2
-```
-
-### Using Systemd Timer
-
-Create `/etc/systemd/system/slurm-usage.service`:
-
-```ini
-[Unit]
-Description=SLURM Usage Collection
-
-[Service]
-Type=oneshot
-User=your-username
-# If installed with uv tool or pip:
-ExecStart=/path/to/slurm-usage collect --days 2
-# Or if running from source:
-# ExecStart=/path/to/slurm-usage/slurm_usage.py collect --days 2
-```
-
-Create `/etc/systemd/system/slurm-usage.timer`:
-
-```ini
-[Unit]
-Description=Daily SLURM Usage Collection
-
-[Timer]
-OnCalendar=daily
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-Enable the timer:
-
-```bash
-sudo systemctl enable --now slurm-usage.timer
 ```
 
 ## Data Schema
