@@ -805,6 +805,7 @@ def _parse_gpu_count(alloc_tres: str) -> int:
     return 0
 
 
+@functools.lru_cache(maxsize=256)
 def parse_node_list(node_list: str) -> list[str]:
     """Parse SLURM node list format into individual node names.
 
@@ -1434,14 +1435,24 @@ def _extract_node_usage_data(df: pl.DataFrame) -> pl.DataFrame:
     if jobs_with_nodes.is_empty():
         return pl.DataFrame()
 
-    # Vectorized approach: process all rows at once
-    # Combine all column operations into a single with_columns call for better performance
+    # OPTIMIZATION: Pre-compute parsing for unique node patterns only
+    # This is much faster than calling parse_node_list for every row
+    unique_node_lists = jobs_with_nodes["node_list"].unique().to_list()
+    node_list_mapping = {node_list: parse_node_list(node_list) for node_list in unique_node_lists}
+
+    # Create a DataFrame with the mapping for joining
+    mapping_df = pl.DataFrame(
+        {
+            "node_list": list(node_list_mapping.keys()),
+            "parsed_nodes": list(node_list_mapping.values()),
+        },
+    )
+
+    # Join to get parsed nodes and continue with vectorized operations
     jobs_with_nodes = (
-        jobs_with_nodes.with_columns(
-            [
-                pl.col("node_list").map_elements(parse_node_list, return_dtype=pl.List(pl.Utf8)).alias("parsed_nodes"),
-                pl.col("elapsed_seconds").truediv(3600).alias("elapsed_hours"),
-            ],
+        jobs_with_nodes.join(mapping_df, on="node_list", how="left")
+        .with_columns(
+            pl.col("elapsed_seconds").truediv(3600).alias("elapsed_hours"),
         )
         .with_columns(
             pl.col("parsed_nodes").list.len().alias("num_nodes"),
