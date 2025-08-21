@@ -1982,60 +1982,62 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
         .sort("total_cpu_hours", descending=True)
     )
 
-    # Display per-group resource usage
-    console.print("\n[bold cyan]═══ Resource Usage by Group ═══[/bold cyan]\n")
-
-    group_table = Table(title="Research Group Statistics", box=box.ROUNDED)
-    group_table.add_column("Group", style="magenta")
-    group_table.add_column("Users", justify="right")
-    group_table.add_column("Jobs", justify="right")
-    group_table.add_column("CPU Hours", justify="right", style="yellow")
-    group_table.add_column("Memory GB-hrs", justify="right", style="blue")
-    group_table.add_column("GPU Hours", justify="right", style="green")
-
-    for row in group_stats.iter_rows():
-        group_table.add_row(
-            row[0],  # group
-            f"{row[1]}",  # unique_users
-            f"{row[2]:,}",  # job_count
-            f"{row[3]:,.0f}",  # cpu_hours
-            f"{row[4]:,.0f}",  # memory_gb_hours
-            f"{row[5]:,.0f}",  # gpu_hours
-        )
-
-    console.print(group_table)
-
-    # Create bar charts for group-based CPU and GPU usage
+    # Only show group statistics if there are actual groups (not just "ungrouped")
     groups = group_stats["group"].to_list()
-    group_cpu_hours = group_stats["total_cpu_hours"].to_list()
-    group_gpu_hours = group_stats["total_gpu_hours"].to_list()
+    if len(groups) > 1 or (len(groups) == 1 and groups[0] != "ungrouped"):
+        # Display per-group resource usage
+        console.print("\n[bold cyan]═══ Resource Usage by Group ═══[/bold cyan]\n")
 
-    console.print("\n")
-    _create_bar_chart(
-        groups,
-        group_cpu_hours,
-        "CPU Hours by Research Group",
-        width=50,
-        top_n=15,
-        unit="hours",
-        show_percentage=True,
-        item_type="groups",
-    )
+        group_table = Table(title="Research Group Statistics", box=box.ROUNDED)
+        group_table.add_column("Group", style="magenta")
+        group_table.add_column("Users", justify="right")
+        group_table.add_column("Jobs", justify="right")
+        group_table.add_column("CPU Hours", justify="right", style="yellow")
+        group_table.add_column("Memory GB-hrs", justify="right", style="blue")
+        group_table.add_column("GPU Hours", justify="right", style="green")
 
-    # Show GPU hours by group if any GPU usage
-    group_gpu_with_hours = [(g, h) for g, h in zip(groups, group_gpu_hours, strict=False) if h > 0]
-    if group_gpu_with_hours:
-        gpu_groups, gpu_group_values = zip(*group_gpu_with_hours, strict=False)
+        for row in group_stats.iter_rows():
+            group_table.add_row(
+                row[0],  # group
+                f"{row[1]}",  # unique_users
+                f"{row[2]:,}",  # job_count
+                f"{row[3]:,.0f}",  # cpu_hours
+                f"{row[4]:,.0f}",  # memory_gb_hours
+                f"{row[5]:,.0f}",  # gpu_hours
+            )
+
+        console.print(group_table)
+
+        # Create bar charts for group-based CPU and GPU usage
+        group_cpu_hours = group_stats["total_cpu_hours"].to_list()
+        group_gpu_hours = group_stats["total_gpu_hours"].to_list()
+
+        console.print("\n")
         _create_bar_chart(
-            list(gpu_groups),
-            list(gpu_group_values),
-            "GPU Hours by Research Group",
+            groups,
+            group_cpu_hours,
+            "CPU Hours by Research Group",
             width=50,
-            top_n=10,
+            top_n=15,
             unit="hours",
             show_percentage=True,
             item_type="groups",
         )
+
+        # Show GPU hours by group if any GPU usage
+        group_gpu_with_hours = [(g, h) for g, h in zip(groups, group_gpu_hours, strict=False) if h > 0]
+        if group_gpu_with_hours:
+            gpu_groups, gpu_group_values = zip(*group_gpu_with_hours, strict=False)
+            _create_bar_chart(
+                list(gpu_groups),
+                list(gpu_group_values),
+                "GPU Hours by Research Group",
+                width=50,
+                top_n=10,
+                unit="hours",
+                show_percentage=True,
+                item_type="groups",
+            )
 
     # Analyze node usage
     _create_node_usage_stats(df)
