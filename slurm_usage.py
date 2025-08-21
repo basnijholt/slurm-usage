@@ -1322,12 +1322,53 @@ def _extract_job_date(start_time: str | None, submit_time: str | None) -> str | 
     return None
 
 
+def _processed_jobs_to_dataframe(
+    processed_jobs: list[ProcessedJob],
+) -> pl.DataFrame:
+    """Convert a list of ProcessedJob objects to a DataFrame.
+
+    Args:
+        processed_jobs: List of ProcessedJob objects
+
+    Returns:
+        DataFrame with job data
+
+    """
+    return pl.DataFrame(
+        [j.to_dict() for j in processed_jobs],
+        infer_schema_length=None,
+    )
+
+
+def _save_processed_jobs_to_parquet(
+    processed_jobs: list[ProcessedJob],
+    file_path: Path,
+) -> None:
+    """Save a list of ProcessedJob objects to a parquet file.
+
+    Args:
+        processed_jobs: List of ProcessedJob objects to save
+        file_path: Path to the parquet file
+
+    """
+    df = _processed_jobs_to_dataframe(processed_jobs)
+    df.write_parquet(file_path)
+
+
+class FetchJobsResult(NamedTuple):
+    """Result from fetching jobs for a date."""
+
+    raw_records: list[RawJobRecord]
+    processed_jobs: list[ProcessedJob]
+    is_complete: bool
+
+
 def _fetch_jobs_for_date(  # noqa: PLR0912
     date_str: str,
     config: Config,
     skip_if_complete: bool = True,  # noqa: FBT001, FBT002
     completion_tracker: DateCompletionTracker | None = None,
-) -> tuple[list[RawJobRecord], list[ProcessedJob], bool]:
+) -> FetchJobsResult:
     """Fetch and process jobs for a specific date.
 
     Args:
@@ -1345,7 +1386,7 @@ def _fetch_jobs_for_date(  # noqa: PLR0912
 
     # Check if this date is already marked as complete
     if skip_if_complete and completion_tracker and completion_tracker.is_complete(date_str):
-        return [], [], True
+        return FetchJobsResult(raw_records=[], processed_jobs=[], is_complete=True)
 
     # Check if we need to re-collect this date
     if skip_if_complete and processed_file.exists():
@@ -1355,7 +1396,7 @@ def _fetch_jobs_for_date(  # noqa: PLR0912
             if incomplete == 0:
                 if completion_tracker:
                     completion_tracker.mark_complete(date_str)
-                return [], [], True
+                return FetchJobsResult(raw_records=[], processed_jobs=[], is_complete=True)
         except Exception:  # noqa: BLE001, S110
             pass  # If we can't read it, re-collect
 
@@ -1380,7 +1421,7 @@ def _fetch_jobs_for_date(  # noqa: PLR0912
         raw_records_unfiltered = _fetch_raw_records_from_slurm(date_str)
         if not raw_records_unfiltered:
             # SLURM error occurred
-            return [], [], False
+            return FetchJobsResult(raw_records=[], processed_jobs=[], is_complete=False)
 
     # Apply incremental filtering
     raw_records, skipped_count = _apply_incremental_filtering(
@@ -1400,7 +1441,7 @@ def _fetch_jobs_for_date(  # noqa: PLR0912
                     completion_tracker.mark_complete(date_str)
             except Exception:  # noqa: BLE001, S110
                 pass
-        return [], [], is_complete
+        return FetchJobsResult(raw_records=[], processed_jobs=[], is_complete=is_complete)
 
     # Process raw records into jobs
     processed_jobs, is_complete = _process_raw_records_into_jobs(raw_records)
@@ -1408,7 +1449,7 @@ def _fetch_jobs_for_date(  # noqa: PLR0912
     if is_complete and completion_tracker:
         completion_tracker.mark_complete(date_str)
 
-    return raw_records, processed_jobs, is_complete
+    return FetchJobsResult(raw_records=raw_records, processed_jobs=processed_jobs, is_complete=is_complete)
 
 
 # ============================================================================
@@ -2318,7 +2359,10 @@ def collect(  # noqa: PLR0912, PLR0915
             for future in as_completed(future_to_date):
                 date_str = future_to_date[future]
                 try:
-                    raw_records, processed_jobs, is_complete = future.result()
+                    result = future.result()
+                    raw_records = result.raw_records
+                    processed_jobs = result.processed_jobs
+                    is_complete = result.is_complete
 
                     if raw_records:
                         # Save raw data (keeping for archival - SLURM might purge old data)
@@ -2327,17 +2371,16 @@ def collect(  # noqa: PLR0912, PLR0915
                         raw_df.write_parquet(raw_file)
                         total_raw += len(raw_records)
 
-                    if processed_jobs:
-                        # Smart merge with existing data if re-collecting
-                        processed_file = config.processed_data_dir / f"{date_str}.parquet"
+                    # Always ensure processed file exists if we have any data (raw or processed)
+                    processed_file = config.processed_data_dir / f"{date_str}.parquet"
+                    raw_file = config.raw_data_dir / f"{date_str}.parquet"
 
+                    if processed_jobs:
+                        # We have new processed jobs to save/merge
                         if processed_file.exists():
                             # Load existing data
                             existing_df = pl.read_parquet(processed_file)
-                            new_df = pl.DataFrame(
-                                [j.to_dict() for j in processed_jobs],
-                                infer_schema_length=None,
-                            )
+                            new_df = _processed_jobs_to_dataframe(processed_jobs)
 
                             # Merge: keep the most recent version of each job
                             # This updates job states for existing jobs and adds new ones
@@ -2350,14 +2393,19 @@ def collect(  # noqa: PLR0912, PLR0915
                             total_processed += len(new_df) - len(existing_df) + len(merged_df)
                         else:
                             # First time collecting this date
-                            processed_df = pl.DataFrame(
-                                [j.to_dict() for j in processed_jobs],
-                                infer_schema_length=None,
-                            )
-                            processed_df.write_parquet(processed_file)
+                            _save_processed_jobs_to_parquet(processed_jobs, processed_file)
                             total_processed += len(processed_jobs)
 
                         successful_dates.append(date_str)
+                    elif not processed_file.exists() and raw_file.exists():
+                        # No new jobs, but we have a raw file and no processed file
+                        # Process the raw file to create the processed file
+                        raw_records = _load_raw_records_from_parquet(raw_file, date_str)
+                        if raw_records:
+                            jobs, _ = _process_raw_records_into_jobs(raw_records)
+                            if jobs:
+                                _save_processed_jobs_to_parquet(jobs, processed_file)
+                                total_processed += len(jobs)
 
                     if is_complete:
                         completed_dates += 1
@@ -2589,17 +2637,17 @@ def test() -> None:
     config = Config.create()
     config.ensure_directories_exist()
     today = datetime.now(UTC).strftime("%Y-%m-%d")
-    raw_records, processed_jobs, is_complete = _fetch_jobs_for_date(
+    fetch_result = _fetch_jobs_for_date(
         today,
         config,
         skip_if_complete=False,
     )
 
-    if raw_records:
-        console.print(f"[green]✓ Found {len(raw_records)} raw records[/green]")
-        console.print(f"[green]✓ Processed {len(processed_jobs)} jobs[/green]")
-        if raw_records:
-            sample = raw_records[0]
+    if fetch_result.raw_records:
+        console.print(f"[green]✓ Found {len(fetch_result.raw_records)} raw records[/green]")
+        console.print(f"[green]✓ Processed {len(fetch_result.processed_jobs)} jobs[/green]")
+        if fetch_result.raw_records:
+            sample = fetch_result.raw_records[0]
             console.print(f"  Sample user: {sample.User}")
             console.print(f"  Sample job: {sample.JobName}")
             console.print(f"  Main job: {sample.is_main_job}")
