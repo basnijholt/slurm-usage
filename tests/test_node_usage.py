@@ -172,9 +172,21 @@ class TestNodeUsageCalculations:
         with patch("slurm_usage._get_node_cpus", side_effect=mock_get_cpus):
             result = slurm_usage._aggregate_node_statistics(node_usage_data, period_days=7)
 
-            # Should only have node-001, node-bad should be filtered out
-            assert len(result) == 1
-            assert result["node"][0] == "node-001"
+            # Should have both nodes - node-bad with null CPU info
+            assert len(result) == 2
+
+            # Check node-001 has utilization
+            node_001 = result.filter(pl.col("node") == "node-001")
+            assert len(node_001) == 1
+            assert node_001["est_cpus"][0] == 64
+            assert node_001["cpu_utilization_pct"][0] is not None
+
+            # Check node-bad has null CPU info but data is preserved
+            node_bad = result.filter(pl.col("node") == "node-bad")
+            assert len(node_bad) == 1
+            assert node_bad["est_cpus"][0] is None
+            assert node_bad["cpu_utilization_pct"][0] is None
+            assert node_bad["total_cpu_hours"][0] == 50.0
 
     def test_parse_node_list_variations(self) -> None:
         """Test various node list formats are parsed correctly."""

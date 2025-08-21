@@ -1647,26 +1647,23 @@ def _aggregate_node_statistics(
         try:
             return _get_node_cpus(node_name)
         except ValueError:
-            console.print(f"[yellow]Warning: Could not get CPU info for node {node_name}[/yellow]")
-            return None
+            return None  # Don't print here, will be handled in display
 
     node_stats = node_stats.with_columns(
         pl.col("node").map_elements(safe_get_node_cpus, return_dtype=pl.Int64).alias("est_cpus"),
     )
 
-    # Filter out nodes where we couldn't get CPU info
-    node_stats = node_stats.filter(pl.col("est_cpus").is_not_null())
-
-    # Calculate total CPU hours available per node
+    # Calculate total CPU hours available per node (only for nodes with CPU info)
     node_stats = node_stats.with_columns(
-        (pl.col("est_cpus") * period_days * 24).alias("cpu_hours_available"),
+        pl.when(pl.col("est_cpus").is_not_null()).then(pl.col("est_cpus") * period_days * 24).otherwise(None).alias("cpu_hours_available"),
     )
 
-    # Add utilization percentage
+    # Add utilization percentage (null for nodes without CPU info)
     return node_stats.with_columns(
-        (pl.col("total_cpu_hours") / pl.col("cpu_hours_available") * 100).alias(
-            "cpu_utilization_pct",
-        ),
+        pl.when(pl.col("cpu_hours_available").is_not_null())
+        .then(pl.col("total_cpu_hours") / pl.col("cpu_hours_available") * 100)
+        .otherwise(None)
+        .alias("cpu_utilization_pct"),
     )
 
 
@@ -1680,6 +1677,14 @@ def _display_node_usage_table(node_stats: pl.DataFrame) -> None:
     if node_stats.is_empty():
         return
 
+    # Report nodes with missing CPU info
+    missing_cpu_nodes = node_stats.filter(pl.col("est_cpus").is_null())
+    if not missing_cpu_nodes.is_empty():
+        console.print("[yellow]Warning: The following nodes have missing CPU information:[/yellow]")
+        for row in missing_cpu_nodes.iter_rows(named=True):
+            console.print(f"[yellow]  - {row['node']}: {row['total_cpu_hours']:,.0f} CPU hours (utilization cannot be calculated)[/yellow]")
+        console.print()
+
     node_table = Table(title="Node Resource Usage", box=box.ROUNDED)
     node_table.add_column("Node", style="cyan")
     node_table.add_column("Jobs", justify="right")
@@ -1688,12 +1693,15 @@ def _display_node_usage_table(node_stats: pl.DataFrame) -> None:
     node_table.add_column("CPU Util %", justify="right")
 
     for row in node_stats.head(20).iter_rows(named=True):
+        # Format utilization - show N/A if missing
+        util_str = f"{row['cpu_utilization_pct']:.1f}%" if row["cpu_utilization_pct"] is not None else "N/A"
+
         node_table.add_row(
             row["node"],
             f"{row['job_count']:,}",
             f"{row['total_cpu_hours']:,.0f}",
             f"{row['total_gpu_hours']:,.0f}",
-            f"{row['cpu_utilization_pct']:.1f}%",
+            util_str,
         )
 
     console.print(node_table)
@@ -1710,20 +1718,22 @@ def _display_node_utilization_charts(node_stats: pl.DataFrame, period_days: int)
     if node_stats.is_empty():
         return
 
-    # Create bar chart for node CPU utilization
-    nodes = node_stats["node"].to_list()
-    cpu_util = node_stats["cpu_utilization_pct"].to_list()
+    # Create bar chart for node CPU utilization (only for nodes with CPU info)
+    nodes_with_cpu = node_stats.filter(pl.col("cpu_utilization_pct").is_not_null())
+    if not nodes_with_cpu.is_empty():
+        nodes = nodes_with_cpu["node"].to_list()
+        cpu_util = nodes_with_cpu["cpu_utilization_pct"].to_list()
 
-    console.print("\n")
-    _create_bar_chart(
-        nodes,
-        cpu_util,
-        f"Node CPU Utilization (% of {period_days} days)",
-        width=50,
-        top_n=20,
-        unit="%",
-        item_type="nodes",
-    )
+        console.print("\n")
+        _create_bar_chart(
+            nodes,
+            cpu_util,
+            f"Node CPU Utilization (% of {period_days} days)",
+            width=50,
+            top_n=20,
+            unit="%",
+            item_type="nodes",
+        )
 
     # Show GPU node utilization if any
     gpu_nodes = node_stats.filter(pl.col("total_gpu_hours") > 0)
