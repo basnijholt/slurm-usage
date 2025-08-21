@@ -1435,29 +1435,25 @@ def _extract_node_usage_data(df: pl.DataFrame) -> pl.DataFrame:
         return pl.DataFrame()
 
     # Vectorized approach: process all rows at once
-    # First, add parsed nodes and node count columns
-    jobs_with_nodes = jobs_with_nodes.with_columns(
-        [
-            pl.col("node_list").map_elements(parse_node_list, return_dtype=pl.List(pl.Utf8)).alias("parsed_nodes"),
-            pl.col("elapsed_seconds").truediv(3600).alias("elapsed_hours"),
-        ],
-    )
-
-    # Add node count for division
-    jobs_with_nodes = jobs_with_nodes.with_columns(
-        pl.col("parsed_nodes").list.len().alias("num_nodes"),
-    )
-
-    # Filter out rows with no nodes
-    jobs_with_nodes = jobs_with_nodes.filter(pl.col("num_nodes") > 0)
-
-    # Calculate per-node resources
-    jobs_with_nodes = jobs_with_nodes.with_columns(
-        [
-            (pl.col("cpu_hours_reserved") / pl.col("num_nodes")).alias("cpu_hours_per_node"),
-            (pl.col("gpu_hours_reserved") / pl.col("num_nodes")).alias("gpu_hours_per_node"),
-            (pl.col("elapsed_hours") / pl.col("num_nodes")).alias("elapsed_hours_per_node"),
-        ],
+    # Combine all column operations into a single with_columns call for better performance
+    jobs_with_nodes = (
+        jobs_with_nodes.with_columns(
+            [
+                pl.col("node_list").map_elements(parse_node_list, return_dtype=pl.List(pl.Utf8)).alias("parsed_nodes"),
+                pl.col("elapsed_seconds").truediv(3600).alias("elapsed_hours"),
+            ],
+        )
+        .with_columns(
+            pl.col("parsed_nodes").list.len().alias("num_nodes"),
+        )
+        .filter(pl.col("num_nodes") > 0)
+        .with_columns(
+            [
+                (pl.col("cpu_hours_reserved") / pl.col("num_nodes")).alias("cpu_hours_per_node"),
+                (pl.col("gpu_hours_reserved") / pl.col("num_nodes")).alias("gpu_hours_per_node"),
+                (pl.col("elapsed_hours") / pl.col("num_nodes")).alias("elapsed_hours_per_node"),
+            ],
+        )
     )
 
     # Explode the parsed_nodes list to create one row per node
@@ -1471,10 +1467,6 @@ def _extract_node_usage_data(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-# Cache for node information to avoid repeated sinfo calls
-_NODE_INFO_CACHE: dict[str, dict[str, int]] = {}
-
-
 @functools.lru_cache
 def _get_node_info_from_slurm() -> dict[str, dict[str, int]]:  # noqa: PLR0912
     """Get node CPU and GPU information from SLURM using sinfo.
@@ -1483,12 +1475,6 @@ def _get_node_info_from_slurm() -> dict[str, dict[str, int]]:  # noqa: PLR0912
         Dictionary mapping node names to their CPU and GPU counts
 
     """
-    global _NODE_INFO_CACHE
-
-    # Return cached data if available
-    if _NODE_INFO_CACHE:
-        return _NODE_INFO_CACHE
-
     node_info = {}
 
     try:
@@ -1535,9 +1521,6 @@ def _get_node_info_from_slurm() -> dict[str, dict[str, int]]:  # noqa: PLR0912
                                     node_info[node_name] = {"cpus": 64, "gpus": gpu_count}
                             except (ValueError, IndexError):
                                 continue
-
-        # Cache the results
-        _NODE_INFO_CACHE = node_info
 
     except Exception as e:  # noqa: BLE001
         console.print(f"[yellow]Warning: Could not get node info from sinfo: {e}[/yellow]")
@@ -1626,8 +1609,8 @@ def _aggregate_node_statistics(
     if node_df.is_empty():
         return pl.DataFrame()
 
-    # Aggregate by node
-    node_stats = (
+    # Aggregate by node and chain all operations for better performance
+    return (
         node_df.group_by("node")
         .agg(
             [
@@ -1638,23 +1621,18 @@ def _aggregate_node_statistics(
             ],
         )
         .sort("total_cpu_hours", descending=True)
-    )
-
-    node_stats = node_stats.with_columns(
-        pl.col("node").map_elements(_get_node_cpus, return_dtype=pl.Int64).alias("est_cpus"),
-    )
-
-    # Calculate total CPU hours available per node (only for nodes with CPU info)
-    node_stats = node_stats.with_columns(
-        pl.when(pl.col("est_cpus").is_not_null()).then(pl.col("est_cpus") * period_days * 24).otherwise(None).alias("cpu_hours_available"),
-    )
-
-    # Add utilization percentage (null for nodes without CPU info)
-    return node_stats.with_columns(
-        pl.when(pl.col("cpu_hours_available").is_not_null())
-        .then(pl.col("total_cpu_hours") / pl.col("cpu_hours_available") * 100)
-        .otherwise(None)
-        .alias("cpu_utilization_pct"),
+        .with_columns(
+            pl.col("node").map_elements(_get_node_cpus, return_dtype=pl.Int64).alias("est_cpus"),
+        )
+        .with_columns(
+            pl.when(pl.col("est_cpus").is_not_null()).then(pl.col("est_cpus") * period_days * 24).otherwise(None).alias("cpu_hours_available"),
+        )
+        .with_columns(
+            pl.when(pl.col("cpu_hours_available").is_not_null())
+            .then(pl.col("total_cpu_hours") / pl.col("cpu_hours_available") * 100)
+            .otherwise(None)
+            .alias("cpu_utilization_pct"),
+        )
     )
 
 
@@ -2259,10 +2237,6 @@ def collect(  # noqa: PLR0912, PLR0915
         ),
     )
 
-    # Clear node info cache to get fresh data
-    global _NODE_INFO_CACHE
-    _NODE_INFO_CACHE = {}
-
     # Create config and ensure directories exist
     config = Config.create(data_dir=data_dir)
     config.ensure_directories_exist()
@@ -2421,10 +2395,6 @@ def analyze(
         ),
     )
 
-    # Clear node info cache to get fresh data
-    global _NODE_INFO_CACHE
-    _NODE_INFO_CACHE = {}
-
     config = Config.create(data_dir=data_dir)
     df = _load_recent_data(config, days)
 
@@ -2532,10 +2502,6 @@ def current() -> None:
 def nodes() -> None:
     """Display node information from SLURM."""
     console.print(Panel.fit("[bold cyan]SLURM Node Information[/bold cyan]", border_style="cyan"))
-
-    # Clear cache to get fresh data
-    global _NODE_INFO_CACHE
-    _NODE_INFO_CACHE = {}
 
     # Get node information
     node_info = _get_node_info_from_slurm()

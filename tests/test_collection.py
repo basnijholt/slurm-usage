@@ -385,9 +385,6 @@ class TestNodeInfoCache:
 
     def test_node_info_cache(self) -> None:
         """Test that node info is cached properly."""
-        # Clear cache first
-        slurm_usage._NODE_INFO_CACHE = {}
-
         # First call should populate cache
         info1 = slurm_usage._get_node_info_from_slurm()
         assert len(info1) > 0
@@ -395,7 +392,6 @@ class TestNodeInfoCache:
         # Second call should use cache
         info2 = slurm_usage._get_node_info_from_slurm()
         assert info1 == info2
-        assert info1 == slurm_usage._NODE_INFO_CACHE
 
     def test_get_node_cpus(self) -> None:
         """Test getting CPU count for a node."""

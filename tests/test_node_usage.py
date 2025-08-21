@@ -173,10 +173,9 @@ class TestNodeUsageCalculations:
             ],
         )
 
-        def mock_get_cpus(node_name: str) -> int:
+        def mock_get_cpus(node_name: str) -> int | None:
             if node_name == "node-bad":
-                msg = f"Could not get CPU count for node '{node_name}'"
-                raise ValueError(msg)
+                return None  # Return None for nodes where CPU info cannot be retrieved
             return 64
 
         with patch("slurm_usage._get_node_cpus", side_effect=mock_get_cpus):

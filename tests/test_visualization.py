@@ -9,7 +9,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import polars as pl
-import pytest
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -396,13 +395,15 @@ class TestErrorHandling:
 
     def test_get_node_cpus_error(self) -> None:
         """Test error handling when node not found."""
-        with pytest.raises(ValueError, match="Could not get CPU count"):
-            slurm_usage._get_node_cpus("nonexistent-node")
+        # Now returns None instead of raising exception
+        result = slurm_usage._get_node_cpus("nonexistent-node")
+        assert result is None
 
     def test_get_node_gpus_error(self) -> None:
         """Test error handling when node not found."""
-        with pytest.raises(ValueError, match="Could not get GPU count"):
-            slurm_usage._get_node_gpus("nonexistent-node")
+        # Now returns None instead of raising exception
+        result = slurm_usage._get_node_gpus("nonexistent-node")
+        assert result is None
 
     @patch("slurm_usage.run_sacct")
     def test_fetch_raw_records_error(self, mock_sacct: MagicMock, test_dates: dict[str, str]) -> None:
