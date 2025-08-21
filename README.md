@@ -79,15 +79,41 @@ That's it! The script uses `uv` inline script dependencies, so all Python packag
 
 ## Installation
 
+### Quick Start (no installation needed)
+
+```bash
+# Run directly with uvx (uv tool run)
+uvx slurm-usage --help
+
+# Or for a specific command
+uvx slurm-usage collect --days 7
+```
+
+### Install as a Tool
+
+```bash
+# Install globally with uv
+uv tool install slurm-usage
+
+# Or with pip
+pip install slurm-usage
+
+# Then use directly
+slurm-usage --help
+```
+
+### Run from Source
+
 ```bash
 # Clone the repository
 git clone https://github.com/basnijholt/slurm-usage
 cd slurm-usage
 
-# Make script executable (if needed)
-chmod +x slurm_usage.py
+# Run the script directly (dependencies auto-installed by uv)
+./slurm_usage.py --help
 
-# That's it! Dependencies are auto-installed via uv when you run the script
+# Or with Python
+python slurm_usage.py --help
 ```
 
 ## Usage
@@ -134,29 +160,31 @@ The following commands are available:
 
 ```bash
 # Collect data (uses 4 parallel workers by default)
-./slurm_usage.py collect
+slurm-usage collect
 
 # Collect last 7 days of data
-./slurm_usage.py collect --days 7
+slurm-usage collect --days 7
 
 # Collect with more parallel workers
-./slurm_usage.py collect --n-parallel 8
+slurm-usage collect --n-parallel 8
 
 # Analyze collected data
-./slurm_usage.py analyze --days 7
+slurm-usage analyze --days 7
 
 # Display current cluster usage
-./slurm_usage.py current
+slurm-usage current
 
 # Display node information
-./slurm_usage.py nodes
+slurm-usage nodes
 
 # Check system status
-./slurm_usage.py status
+slurm-usage status
 
 # Test system configuration
-./slurm_usage.py test
+slurm-usage test
 ```
+
+Note: If running from source, use `./slurm_usage.py` instead of `slurm-usage`.
 
 ### Command Options
 
@@ -321,7 +349,10 @@ groups:
 # Add to crontab (runs daily at 2 AM)
 crontab -e
 
-# Add this line (collects last 2 days to catch any state changes):
+# If installed with uv tool or pip:
+0 2 * * * /path/to/slurm-usage collect --days 2
+
+# Or if running from source:
 0 2 * * * /path/to/slurm-usage/slurm_usage.py collect --days 2
 ```
 
@@ -336,7 +367,10 @@ Description=SLURM Usage Collection
 [Service]
 Type=oneshot
 User=your-username
-ExecStart=/path/to/slurm-usage/slurm_usage.py collect --days 2
+# If installed with uv tool or pip:
+ExecStart=/path/to/slurm-usage collect --days 2
+# Or if running from source:
+# ExecStart=/path/to/slurm-usage/slurm_usage.py collect --days 2
 ```
 
 Create `/etc/systemd/system/slurm-usage.timer`:
@@ -510,7 +544,7 @@ if dfs:
     print("\n## CPU Hours Wasted by Partition")
     print(waste_by_partition)
 else:
-    print("No data files found. Run `./slurm_usage.py collect` first.")
+    print("No data files found. Run `slurm-usage collect` first.")
 ```
 
 <!-- OUTPUT:END -->
@@ -524,7 +558,7 @@ else:
 
 **Collection is slow?**
 
-- Increase parallel workers: `./slurm_usage.py collect --n-parallel 8`
+- Increase parallel workers: `slurm-usage collect --n-parallel 8`
 - The first run processes historical data and will be slower
 
 **Missing user groups?**
@@ -535,7 +569,7 @@ else:
 **Script won't run?**
 
 - Ensure `uv` is installed: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- Check SLURM access: `./slurm_usage.py test`
+- Check SLURM access: `slurm-usage test` (or `./slurm_usage.py test` if running from source)
 
 ## License
 
