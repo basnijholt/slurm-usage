@@ -400,18 +400,12 @@ class TestNodeInfoCache:
     def test_get_node_cpus(self) -> None:
         """Test getting CPU count for a node."""
         # This should work with mock data
-        try:
-            cpus = slurm_usage._get_node_cpus("node-001")
-            assert cpus > 0
-        except ValueError:
-            # Expected if node not in mock data
-            pass
+        cpus = slurm_usage._get_node_cpus("node-001")
+        assert isinstance(cpus, int)
+        assert cpus > 0
 
     def test_get_node_gpus(self) -> None:
         """Test getting GPU count for a node."""
-        try:
-            gpus = slurm_usage._get_node_gpus("node-001")
-            assert gpus >= 0
-        except ValueError:
-            # Expected if node not in mock data
-            pass
+        gpus = slurm_usage._get_node_gpus("node-001")
+        assert isinstance(gpus, int)
+        assert gpus >= 0

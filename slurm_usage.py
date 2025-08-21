@@ -19,6 +19,7 @@ Part of the [slurm-usage](https://github.com/basnijholt/slurm-usage) library.
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import os
 import re
@@ -1474,6 +1475,7 @@ def _extract_node_usage_data(df: pl.DataFrame) -> pl.DataFrame:
 _NODE_INFO_CACHE: dict[str, dict[str, int]] = {}
 
 
+@functools.lru_cache
 def _get_node_info_from_slurm() -> dict[str, dict[str, int]]:  # noqa: PLR0912
     """Get node CPU and GPU information from SLURM using sinfo.
 
@@ -1543,17 +1545,16 @@ def _get_node_info_from_slurm() -> dict[str, dict[str, int]]:  # noqa: PLR0912
     return node_info
 
 
-def _get_node_cpus(node_name: str) -> int:
+@functools.lru_cache(maxsize=256)
+def _get_node_cpus(node_name: str) -> int | None:
     """Get number of CPUs for a node from SLURM.
 
     Args:
         node_name: Name of the node
 
     Returns:
-        Number of CPUs
+        Number of CPUs or None if not found.
 
-    Raises:
-        ValueError: If node information cannot be retrieved from SLURM
 
     """
     node_info = _get_node_info_from_slurm()
@@ -1561,22 +1562,18 @@ def _get_node_cpus(node_name: str) -> int:
     if node_name in node_info:
         return node_info[node_name]["cpus"]
 
-    # No fallback - fail if we can't get info from SLURM
-    msg = f"Could not get CPU count for node '{node_name}' from SLURM"
-    raise ValueError(msg)
+    return None
 
 
-def _get_node_gpus(node_name: str) -> int:
+@functools.lru_cache(maxsize=256)
+def _get_node_gpus(node_name: str) -> int | None:
     """Get number of GPUs for a node from SLURM.
 
     Args:
         node_name: Name of the node
 
     Returns:
-        Number of GPUs
-
-    Raises:
-        ValueError: If node information cannot be retrieved from SLURM
+        Number of GPUs or None if not found.
 
     """
     node_info = _get_node_info_from_slurm()
@@ -1584,9 +1581,10 @@ def _get_node_gpus(node_name: str) -> int:
     if node_name in node_info:
         return node_info[node_name]["gpus"]
 
-    # No fallback - fail if we can't get info from SLURM
-    msg = f"Could not get GPU count for node '{node_name}' from SLURM"
-    raise ValueError(msg)
+    console.print(
+        f"[yellow]Warning: Could not get GPU info for node {node_name}[/yellow]",
+    )
+    return None
 
 
 def _calculate_analysis_period_days(df: pl.DataFrame) -> int:
@@ -1642,15 +1640,8 @@ def _aggregate_node_statistics(
         .sort("total_cpu_hours", descending=True)
     )
 
-    # Add actual CPUs per node from SLURM
-    def safe_get_node_cpus(node_name: str) -> int | None:
-        try:
-            return _get_node_cpus(node_name)
-        except ValueError:
-            return None  # Don't print here, will be handled in display
-
     node_stats = node_stats.with_columns(
-        pl.col("node").map_elements(safe_get_node_cpus, return_dtype=pl.Int64).alias("est_cpus"),
+        pl.col("node").map_elements(_get_node_cpus, return_dtype=pl.Int64).alias("est_cpus"),
     )
 
     # Calculate total CPU hours available per node (only for nodes with CPU info)
@@ -1738,18 +1729,8 @@ def _display_node_utilization_charts(node_stats: pl.DataFrame, period_days: int)
     # Show GPU node utilization if any
     gpu_nodes = node_stats.filter(pl.col("total_gpu_hours") > 0)
     if not gpu_nodes.is_empty():
-
-        def safe_get_node_gpus(node_name: str) -> int | None:
-            try:
-                return _get_node_gpus(node_name)
-            except ValueError:
-                console.print(
-                    f"[yellow]Warning: Could not get GPU info for node {node_name}[/yellow]",
-                )
-                return None
-
         gpu_nodes = gpu_nodes.with_columns(
-            pl.col("node").map_elements(safe_get_node_gpus, return_dtype=pl.Int64).alias("est_gpus"),
+            pl.col("node").map_elements(_get_node_gpus, return_dtype=pl.Int64).alias("est_gpus"),
         )
 
         # Filter out nodes where we couldn't get GPU info or have 0 GPUs
