@@ -36,10 +36,16 @@ jobs:
           uv pip install pandas tabulate polars pyyaml pydantic typer rich
 
       - name: Update README.md with markdown-code-runner
+        env:
+          TERM: dumb
+          NO_COLOR: 1
+          TERMINAL_WIDTH: 90
         run: |
           # Set environment variable to use mock data for tests
           export SLURM_USE_MOCK_DATA=1
           uv run markdown-code-runner --verbose README.md
+          sed -i '' 's/[[:space:]]*$//' README.md
+
 
       - name: Commit updated README.md
         id: commit
