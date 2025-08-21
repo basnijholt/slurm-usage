@@ -1009,6 +1009,7 @@ def _create_bar_chart(
     top_n: int = 20,
     unit: str = "",
     show_percentage: bool = False,  # noqa: FBT001, FBT002
+    item_type: str = "users",  # Type of items being shown (users, nodes, dates, etc.)
 ) -> None:
     """Create a horizontal bar chart using Rich."""
     if not values or len(values) == 0:
@@ -1032,7 +1033,7 @@ def _create_bar_chart(
 
     # Create the bar chart table
     table = Table(title=title, box=box.SIMPLE, show_header=False)
-    table.add_column("User", style="cyan", width=15)
+    table.add_column(item_type.capitalize(), style="cyan", width=15)
     table.add_column("Bar")
     table.add_column("Value", justify="right")
 
@@ -1062,7 +1063,7 @@ def _create_bar_chart(
         table.add_row(display_label, f"[{bar_color}]{bar}[/{bar_color}]", value_str)
 
     console.print(table)
-    console.print(f"[dim]Showing top {len(data)} users[/dim]\n")
+    console.print(f"[dim]Showing top {len(data)} {item_type}[/dim]\n")
 
 
 # ============================================================================
@@ -1712,6 +1713,7 @@ def _display_node_utilization_charts(node_stats: pl.DataFrame, period_days: int)
         width=50,
         top_n=20,
         unit="%",
+        item_type="nodes",
     )
 
     # Show GPU node utilization if any
@@ -1756,6 +1758,7 @@ def _display_node_utilization_charts(node_stats: pl.DataFrame, period_days: int)
             width=50,
             top_n=10,
             unit="%",
+            item_type="nodes",
         )
 
 
@@ -1911,6 +1914,7 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
         top_n=20,
         unit="hours",
         show_percentage=True,
+        item_type="users",
     )
 
     # Create bar chart for GPU hours per user (if any GPU usage)
@@ -1927,6 +1931,7 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
             top_n=10,
             unit="hours",
             show_percentage=True,
+            item_type="users",
         )
 
     # Create bar charts for efficiency metrics
@@ -1942,6 +1947,7 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
             width=50,
             top_n=20,
             unit="%",
+            item_type="users",
         )
 
     mem_eff = user_stats["avg_mem_efficiency"].to_list()
@@ -1956,6 +1962,7 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
             width=50,
             top_n=20,
             unit="%",
+            item_type="users",
         )
 
     # Calculate per-group statistics
@@ -2012,6 +2019,7 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
         top_n=15,
         unit="hours",
         show_percentage=True,
+        item_type="groups",
     )
 
     # Show GPU hours by group if any GPU usage
@@ -2026,6 +2034,7 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
             top_n=10,
             unit="hours",
             show_percentage=True,
+            item_type="groups",
         )
 
     # Analyze node usage
@@ -2210,6 +2219,7 @@ def _create_daily_usage_chart(df: pl.DataFrame) -> None:
             width=50,
             top_n=14,
             unit="CPU-hrs",
+            item_type="days",
         )
 
     # Show GPU usage if any
@@ -2222,6 +2232,7 @@ def _create_daily_usage_chart(df: pl.DataFrame) -> None:
             width=50,
             top_n=14,
             unit="GPU-hrs",
+            item_type="days",
         )
 
 
