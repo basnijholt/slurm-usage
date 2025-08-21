@@ -1444,14 +1444,23 @@ def _extract_node_usage_data(df: pl.DataFrame) -> list[dict[str, float | str]]:
         # Use our robust parser to handle all formats including compound ranges
         parsed_nodes = parse_node_list(nodes)
 
+        # Divide hours by number of nodes (job's resources are split across nodes)
+        num_nodes = len(parsed_nodes)
+        if num_nodes > 0:
+            cpu_hours_per_node = cpu_hours / num_nodes
+            gpu_hours_per_node = gpu_hours / num_nodes
+            elapsed_hours_per_node = elapsed_hours / num_nodes
+        else:
+            continue
+
         # Add usage data for each parsed node
         for node in parsed_nodes:
             node_usage.append(  # noqa: PERF401
                 {
                     "node": node,
-                    "cpu_hours": cpu_hours,
-                    "gpu_hours": gpu_hours,
-                    "elapsed_hours": elapsed_hours,
+                    "cpu_hours": cpu_hours_per_node,
+                    "gpu_hours": gpu_hours_per_node,
+                    "elapsed_hours": elapsed_hours_per_node,
                 },
             )
 
@@ -1681,10 +1690,10 @@ def _display_node_usage_table(node_stats: pl.DataFrame) -> None:
     for row in node_stats.head(20).iter_rows():
         node_table.add_row(
             row[0],  # node
-            f"{row[3]:,}",  # job_count
-            f"{row[1]:,.0f}",  # cpu_hours
-            f"{row[2]:,.0f}",  # gpu_hours
-            f"{row[6]:.1f}%",  # cpu_utilization_pct
+            f"{row[4]:,}",  # job_count (index 4)
+            f"{row[1]:,.0f}",  # total_cpu_hours (index 1)
+            f"{row[2]:,.0f}",  # total_gpu_hours (index 2)
+            f"{row[7]:.1f}%",  # cpu_utilization_pct (index 7)
         )
 
     console.print(node_table)
