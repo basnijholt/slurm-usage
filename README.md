@@ -552,7 +552,7 @@ if dfs:
     print("\n## CPU Hours Wasted by Partition")
     print(waste_by_partition)
 else:
-    print("No data files found. Run `slurm-usage collect` first.")
+    print("No data files found. Run `./slurm_usage.py collect` first.")
 ```
 
 <!-- OUTPUT:END -->
