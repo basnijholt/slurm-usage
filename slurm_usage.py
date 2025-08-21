@@ -1687,13 +1687,13 @@ def _display_node_usage_table(node_stats: pl.DataFrame) -> None:
     node_table.add_column("GPU Hours", justify="right", style="green")
     node_table.add_column("CPU Util %", justify="right")
 
-    for row in node_stats.head(20).iter_rows():
+    for row in node_stats.head(20).iter_rows(named=True):
         node_table.add_row(
-            row[0],  # node
-            f"{row[4]:,}",  # job_count (index 4)
-            f"{row[1]:,.0f}",  # total_cpu_hours (index 1)
-            f"{row[2]:,.0f}",  # total_gpu_hours (index 2)
-            f"{row[7]:.1f}%",  # cpu_utilization_pct (index 7)
+            row["node"],
+            f"{row['job_count']:,}",
+            f"{row['total_cpu_hours']:,.0f}",
+            f"{row['total_gpu_hours']:,.0f}",
+            f"{row['cpu_utilization_pct']:.1f}%",
         )
 
     console.print(node_table)
@@ -1896,16 +1896,16 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
     user_table.add_column("CPU %", justify="right")
     user_table.add_column("Mem %", justify="right")
 
-    for row in user_stats.head(15).iter_rows():
+    for row in user_stats.head(15).iter_rows(named=True):
         user_table.add_row(
-            row[0][:15],  # user (truncated)
-            f"{row[1]:,}",  # job_count
-            f"{row[2]:,.0f}",  # cpu_hours
-            f"{row[4]:,.0f}",  # gpu_hours (skip memory_gb_hours)
-            f"{row[7]:,.0f}",  # total_ram_gb
-            f"{row[8]:.1f}" if row[8] is not None else "0.0",  # avg_wait_hours
-            f"{row[9]:.1f}" if row[9] is not None else "N/A",  # cpu_efficiency
-            f"{row[10]:.1f}" if row[10] is not None else "N/A",  # mem_efficiency
+            row["user"][:15],  # user (truncated)
+            f"{row['job_count']:,}",
+            f"{row['total_cpu_hours']:,.0f}",
+            f"{row['total_gpu_hours']:,.0f}",
+            f"{row['total_ram_gb']:,.0f}",
+            f"{row['avg_wait_hours']:.1f}" if row["avg_wait_hours"] is not None else "0.0",
+            f"{row['avg_cpu_efficiency']:.1f}" if row["avg_cpu_efficiency"] is not None else "N/A",
+            f"{row['avg_mem_efficiency']:.1f}" if row["avg_mem_efficiency"] is not None else "N/A",
         )
 
     console.print(user_table)
@@ -2005,14 +2005,14 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
         group_table.add_column("Memory GB-hrs", justify="right", style="blue")
         group_table.add_column("GPU Hours", justify="right", style="green")
 
-        for row in group_stats.iter_rows():
+        for row in group_stats.iter_rows(named=True):
             group_table.add_row(
-                row[0],  # group
-                f"{row[1]}",  # unique_users
-                f"{row[2]:,}",  # job_count
-                f"{row[3]:,.0f}",  # cpu_hours
-                f"{row[4]:,.0f}",  # memory_gb_hours
-                f"{row[5]:,.0f}",  # gpu_hours
+                row["group"],
+                f"{row['unique_users']}",
+                f"{row['job_count']:,}",
+                f"{row['total_cpu_hours']:,.0f}",
+                f"{row['total_memory_gb_hours']:,.0f}",
+                f"{row['total_gpu_hours']:,.0f}",
             )
 
         console.print(group_table)
@@ -2116,8 +2116,8 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
             waste_table.add_column("CPU Hours Wasted", justify="right")
             waste_table.add_column("Memory GB-Hours Wasted", justify="right")
 
-            for row in user_waste.iter_rows():
-                waste_table.add_row(row[0], f"{row[1]:,.0f}", f"{row[2]:,.0f}")
+            for row in user_waste.iter_rows(named=True):
+                waste_table.add_row(row["user"], f"{row['cpu_wasted']:,.0f}", f"{row['mem_wasted']:,.0f}")
 
             console.print(waste_table)
 
@@ -2149,7 +2149,7 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
     # Add job state distribution
     state_counts = df.group_by("state").agg(pl.len().alias("count")).sort("count", descending=True)
     top_states = state_counts.head(3)
-    states_str = ", ".join([f"{row[0]}: {row[1]:,}" for row in top_states.iter_rows()])
+    states_str = ", ".join([f"{row['state']}: {row['count']:,}" for row in top_states.iter_rows(named=True)])
     cluster_summary.add_row("Top Job States", states_str)
 
     console.print(cluster_summary)
@@ -2205,14 +2205,14 @@ def _create_daily_usage_chart(df: pl.DataFrame) -> None:
     daily_table.add_column("GPU Hours", justify="right", style="green")
     daily_table.add_column("Memory GB-hrs", justify="right", style="blue")
 
-    for row in daily_stats.tail(14).iter_rows():  # Show last 14 days max
+    for row in daily_stats.tail(14).iter_rows(named=True):  # Show last 14 days max
         daily_table.add_row(
-            row[0],  # date
-            f"{row[1]:,}",  # job_count
-            str(row[5]),  # unique_users
-            f"{row[2]:,.0f}",  # cpu_hours
-            f"{row[3]:,.0f}",  # gpu_hours
-            f"{row[4]:,.0f}",  # memory_gb_hours
+            row["job_date"],
+            f"{row['job_count']:,}",
+            str(row["unique_users"]),
+            f"{row['cpu_hours']:,.0f}",
+            f"{row['gpu_hours']:,.0f}",
+            f"{row['memory_gb_hours']:,.0f}",
         )
 
     console.print(daily_table)
@@ -2457,8 +2457,8 @@ def analyze(
     state_table.add_column("Count", justify="right")
     state_table.add_column("Percentage", justify="right")
 
-    for row in state_stats.iter_rows():
-        state_table.add_row(row[0], f"{row[1]:,}", f"{row[2]:.1f}%")
+    for row in state_stats.iter_rows(named=True):
+        state_table.add_row(row["state"], f"{row['count']:,}", f"{row['percentage']:.1f}%")
 
     console.print(state_table)
 
