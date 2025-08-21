@@ -532,7 +532,8 @@ class RawJobRecord(BaseModel):
         try:
             data = {fields[i]: parts[i] for i in range(len(fields))}
             return cls(**data)
-        except Exception:  # noqa: BLE001
+        except (ValueError, KeyError, IndexError, TypeError):
+            # Expected parsing errors - invalid field values or missing fields
             return None
 
 
@@ -768,10 +769,9 @@ def _parse_cpu_seconds(time_str: str) -> float:
 
 def _parse_int(value: str) -> int:
     """Safely parse string to int."""
-    try:
-        return int(value) if value and value.isdigit() else 0
-    except (ValueError, AttributeError):
-        return 0
+    if value and value.isdigit():
+        return int(value)
+    return 0
 
 
 def _parse_datetime(date_str: str | None) -> datetime | None:
@@ -796,10 +796,10 @@ def _parse_gpu_count(alloc_tres: str) -> int:
     # Look for gres/gpu in the TRES string
     for item in alloc_tres.split(","):
         if "gres/gpu=" in item:
-            try:
-                return int(item.split("=")[1])
-            except (ValueError, IndexError):
-                return 0
+            parts = item.split("=")
+            if len(parts) > 1 and parts[1].isdigit():
+                return int(parts[1])
+            return 0
     return 0
 
 
@@ -1094,11 +1094,12 @@ def _load_raw_records_from_parquet(raw_file: Path, date_str: str) -> list[RawJob
                 job_date = _extract_job_date(record.Start, record.Submit)
                 if job_date == date_str:
                     raw_records.append(record)
-            except Exception:  # noqa: BLE001, PERF203, S112
-                continue  # Skip invalid records
+            except (ValueError, KeyError, TypeError):  # noqa: PERF203
+                # Skip records with invalid field types or missing fields
+                continue
 
         console.print(f"[cyan]Loaded {len(raw_records)} valid records for {date_str}[/cyan]")
-    except Exception as e:  # noqa: BLE001
+    except (OSError, pl.exceptions.ComputeError) as e:
         console.print(f"[yellow]Could not load raw file for {date_str}: {e}[/yellow]")
         return []
     else:
@@ -1145,7 +1146,7 @@ def _load_recent_data(
         try:
             df = pl.read_parquet(f)
             dfs.append(df)
-        except Exception as e:  # noqa: BLE001, PERF203
+        except (OSError, pl.exceptions.ComputeError) as e:  # noqa: PERF203
             console.print(f"[yellow]Warning: Could not read {f}: {e}[/yellow]")
             continue
 
@@ -1392,8 +1393,9 @@ def _fetch_jobs_for_date(  # noqa: PLR0912
                 if completion_tracker:
                     completion_tracker.mark_complete(date_str)
                 return FetchJobsResult(raw_records=[], processed_jobs=[], is_complete=True)
-        except Exception:  # noqa: BLE001, S110
-            pass  # If we can't read it, re-collect
+        except (OSError, pl.exceptions.ComputeError):
+            # If we can't read the file, re-collect
+            pass
 
     # Load existing processed data to track what we've seen
     existing_job_states: dict[str, str] = {}
@@ -1402,7 +1404,8 @@ def _fetch_jobs_for_date(  # noqa: PLR0912
             existing_df = pl.read_parquet(processed_file)
             for row in existing_df.iter_rows(named=True):
                 existing_job_states[row["job_id"]] = row["state"]
-        except Exception:  # noqa: BLE001, S110
+        except (OSError, pl.exceptions.ComputeError):
+            # Failed to read existing data - continue with empty state
             pass
 
     # Get raw records - try raw file first if processed is missing
@@ -1434,7 +1437,8 @@ def _fetch_jobs_for_date(  # noqa: PLR0912
                 is_complete = incomplete == 0
                 if is_complete and completion_tracker:
                     completion_tracker.mark_complete(date_str)
-            except Exception:  # noqa: BLE001, S110
+            except (OSError, pl.exceptions.ComputeError):
+                # Failed to check completion status - assume incomplete
                 pass
         return FetchJobsResult(raw_records=[], processed_jobs=[], is_complete=is_complete)
 
@@ -1555,21 +1559,18 @@ def _get_node_info_from_slurm() -> dict[str, dict[str, int]]:  # noqa: PLR0912
 
                         # Parse GRES string (e.g., "gpu:4" or "gpu:v100:4")
                         if "gpu:" in gres:
-                            try:
-                                # Handle formats like "gpu:4" or "gpu:v100:4"
-                                gpu_parts = gres.split(":")
-                                # The GPU count is always the last number
+                            # Handle formats like "gpu:4" or "gpu:v100:4"
+                            gpu_parts = gres.split(":")
+                            # The GPU count is always the last number
+                            if gpu_parts and gpu_parts[-1].isdigit():
                                 gpu_count = int(gpu_parts[-1])
-
                                 if node_name in node_info:
                                     node_info[node_name]["gpus"] = gpu_count
                                 else:
                                     # Shouldn't happen, but handle gracefully
                                     node_info[node_name] = {"cpus": 64, "gpus": gpu_count}
-                            except (ValueError, IndexError):
-                                continue
 
-    except Exception as e:  # noqa: BLE001
+    except subprocess.SubprocessError as e:
         console.print(f"[yellow]Warning: Could not get node info from sinfo: {e}[/yellow]")
 
     return node_info
@@ -2449,7 +2450,8 @@ def collect(  # noqa: PLR0912, PLR0915
                     )
                     progress.update(task, advance=1, description=f"Collected {date_str}: {status}")
 
-                except Exception as e:  # noqa: BLE001
+                except (OSError, pl.exceptions.ComputeError, ValueError) as e:
+                    # Expected errors: I/O issues, corrupt parquet files, data parsing
                     console.print(f"[red]Error collecting {date_str}: {e}[/red]")
                     progress.update(task, advance=1)
 
