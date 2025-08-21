@@ -107,9 +107,9 @@ The following commands are available:
 [1m                                                                                [0m
 [1m [0m[1;33mUsage: [0m[1mslurm_usage.py [OPTIONS] COMMAND [ARGS]...[0m[1m                             [0m[1m [0m
 [1m                                                                                [0m
- SLURM Job Monitor - Collect and analyze job efficiency metrics                 
-                                                                                
-                                                                                
+ SLURM Job Monitor - Collect and analyze job efficiency metrics
+
+
 [2m╭─[0m[2m Options [0m[2m───────────────────────────────────────────────────────────────────[0m[2m─╮[0m
 [2m│[0m [1;36m-[0m[1;36m-install[0m[1;36m-completion[0m          Install completion for the current shell.      [2m│[0m
 [2m│[0m [1;36m-[0m[1;36m-show[0m[1;36m-completion[0m             Show completion for the current shell, to copy [2m│[0m

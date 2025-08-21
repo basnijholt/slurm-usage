@@ -44,8 +44,7 @@ jobs:
           # Set environment variable to use mock data for tests
           export SLURM_USE_MOCK_DATA=1
           uv run markdown-code-runner --verbose README.md
-          sed -i '' 's/[[:space:]]*$//' README.md
-
+          sed -i 's/[[:space:]]*$//' README.md
 
       - name: Commit updated README.md
         id: commit
