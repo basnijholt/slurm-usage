@@ -20,7 +20,7 @@ groups:
     - irene
 
 # Data directory configuration (optional)
-# - If not specified or set to null, defaults to ./data (relative to script)
+# - If not specified or set to null, defaults to ./data (current working directory)
 # - Set to an explicit path to use a custom location
 # - Useful for shared installations where data should be stored centrally
 #

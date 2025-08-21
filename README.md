@@ -252,24 +252,25 @@ Create a configuration file to define your organization's research groups and op
 
 ### Data Directory
 
-The data directory for storing collected metrics can be configured in three ways:
+The data directory for storing collected metrics can be configured in three ways (in order of priority):
 
-1. **Default**: If not specified, data is stored in `./data` (relative to the script location)
+1. **Command line**: Use `--data-dir /path/to/data` with any command (highest priority)
 
 2. **Configuration file**: Set `data_dir: /path/to/data` in the config file
 
-3. **Command line**: Use `--data-dir /path/to/data` with any command
+3. **Default**: If not specified, data is stored in `./data` (current working directory)
 
 This allows flexible deployment:
-- **Default installation**: Data stored alongside the script
+- **Default installation**: Data stored in `./data` subdirectory
 - **System-wide deployment**: Set `data_dir: /var/lib/slurm-usage` in `/etc/slurm-usage/config.yaml`
 - **Shared installations**: Use a network storage path in the config
+- **Per-run override**: Use `--data-dir` flag to override for specific commands
 
 Example `config.yaml`:
 
 <!-- CODE:BASH:START -->
 <!-- echo '```yaml' -->
-<!-- cat tests/snippets/config_example.yaml -->
+<!-- cat config.example.yaml -->
 <!-- echo '' -->
 <!-- echo '```' -->
 <!-- CODE:END -->
