@@ -431,9 +431,9 @@ crontab -e
 | job_name | str | Job name (max 50 chars) |
 | partition | str | SLURM partition |
 | state | str | Final job state |
-| submit_time | str | None | ISO format submission time |
-| start_time | str | None | ISO format start time |
-| end_time | str | None | ISO format end time |
+| submit_time | datetime.datetime | None | ISO format submission time |
+| start_time | datetime.datetime | None | ISO format start time |
+| end_time | datetime.datetime | None | ISO format end time |
 | node_list | str | Nodes where job ran |
 | elapsed_seconds | int | Runtime in seconds |
 | alloc_cpus | int | CPUs allocated |
