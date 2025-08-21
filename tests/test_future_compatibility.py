@@ -116,6 +116,7 @@ class TestFutureCompatibility:
             command_map = json.load(f)
 
         # Verify we have the expected commands
-        sacct_today_cmd = "sacct -a -S 2025-08-20T00:00:00 -E 2025-08-20T23:59:59 --format=JobID,JobIDRaw,JobName,User,UID,Group,GID,Account,Partition,QOS,State,ExitCode,Submit,Eligible,Start,End,Elapsed,ElapsedRaw,CPUTime,CPUTimeRAW,TotalCPU,UserCPU,SystemCPU,AllocCPUS,AllocNodes,NodeList,ReqCPUS,ReqMem,ReqNodes,Timelimit,TimelimitRaw,MaxRSS,MaxVMSize,MaxDiskRead,MaxDiskWrite,AveRSS,AveCPU,AveVMSize,ConsumedEnergy,ConsumedEnergyRaw,Priority,Reservation,ReservationId,WorkDir,Cluster,ReqTRES,AllocTRES,Comment,Constraints,Container,DerivedExitCode,Flags,Layout,MaxRSSNode,MaxVMSizeNode,MinCPU,NCPUS,NNodes,NTasks,Reason,SubmitLine -P -n"  # noqa: E501
+        # The reference date is 2025-08-21 (when snapshots were captured)
+        sacct_today_cmd = "sacct -a -S 2025-08-21T00:00:00 -E 2025-08-21T23:59:59 --format=JobID,JobIDRaw,JobName,User,UID,Group,GID,Account,Partition,QOS,State,ExitCode,Submit,Eligible,Start,End,Elapsed,ElapsedRaw,CPUTime,CPUTimeRAW,TotalCPU,UserCPU,SystemCPU,AllocCPUS,AllocNodes,NodeList,ReqCPUS,ReqMem,ReqNodes,Timelimit,TimelimitRaw,MaxRSS,MaxVMSize,MaxDiskRead,MaxDiskWrite,AveRSS,AveCPU,AveVMSize,ConsumedEnergy,ConsumedEnergyRaw,Priority,Reservation,ReservationId,WorkDir,Cluster,ReqTRES,AllocTRES,Comment,Constraints,Container,DerivedExitCode,Flags,Layout,MaxRSSNode,MaxVMSizeNode,MinCPU,NCPUS,NNodes,NTasks,Reason,SubmitLine -P -n"  # noqa: E501
         assert sacct_today_cmd in command_map
         assert command_map[sacct_today_cmd] == "sacct_day_0"

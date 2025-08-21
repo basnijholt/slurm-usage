@@ -41,7 +41,7 @@ def mock_datetime_now() -> Generator[MagicMock, None, None]:
 @pytest.fixture
 def test_dates() -> dict[str, str]:
     """Provide consistent test dates based on mock data reference date."""
-    # Use the date from the captured mock data
+    # Use the reference date (the "today" when snapshots were captured)
     base_date = MOCK_DATA_REFERENCE_DATE.date()
 
     return {

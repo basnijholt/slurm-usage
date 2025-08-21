@@ -134,20 +134,29 @@ class TestNodeUsageAnalysis:
 
     def test_calculate_analysis_period_days(self, test_dates: dict[str, str]) -> None:
         """Test calculating analysis period in days."""
+        from datetime import datetime, timedelta
+
+        # Calculate dates relative to test_dates instead of hardcoding
+        today = datetime.fromisoformat(f"{test_dates['today']}T00:00:00")
+        tomorrow = today + timedelta(days=1)
+        day_after_tomorrow = today + timedelta(days=2)
+
         test_data = [
             {
                 "submit_time": f"{test_dates['today']}T10:00:00",
-                "end_time": "2025-08-22T10:00:00",  # 2 days after today
+                "end_time": f"{tomorrow.isoformat()}",  # 1 day after today
             },
             {
                 "submit_time": f"{test_dates['tomorrow']}T10:00:00",
-                "end_time": "2025-08-23T10:00:00",  # 3 days after today
+                "end_time": f"{day_after_tomorrow.isoformat()}",  # 2 days after today
             },
         ]
 
         df = pl.DataFrame(test_data)
         days = slurm_usage._calculate_analysis_period_days(df)
-        expected_days = 4  # From Aug 20 to Aug 23
+        # Period from min(submit_time) = today to max(end_time) = day_after_tomorrow
+        # That's 2 days: today and tomorrow
+        expected_days = 2
         assert days == expected_days
 
     def test_calculate_analysis_period_days_default(self) -> None:

@@ -132,3 +132,6 @@ dmypy.json
 tests/snapshots_raw/
 tests/snapshots/anonymization_mappings.json
 tests/mock_data/
+
+.DS_Store
+data/

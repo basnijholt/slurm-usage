@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
@@ -71,7 +71,7 @@ class TestCLICommands:
         # Skip this test - the collect command has complex requirements
         # that are hard to test in isolation
 
-    def test_collect_command_with_summary(self) -> None:
+    def test_collect_command_with_summary(self, mock_datetime_now: MagicMock) -> None:  # noqa: ARG002
         """Test collect command with summary."""
         # Use --days 7 to ensure we get data from our 8-day snapshot range
         result = runner.invoke(slurm_usage.app, ["collect", "--days", "7"])
@@ -79,7 +79,7 @@ class TestCLICommands:
         assert "Resource Usage by User" in result.stdout
         assert "CPU Hours" in result.stdout
 
-    def test_analyze_command(self) -> None:
+    def test_analyze_command(self, mock_datetime_now: MagicMock) -> None:  # noqa: ARG002
         """Test analyze command."""
         # First collect some data
         runner.invoke(slurm_usage.app, ["collect", "--days", "0", "--summary", "False"])
@@ -149,7 +149,7 @@ class TestDateCompletionTracker:
         loaded_tracker = slurm_usage.DateCompletionTracker.load(tracker_file)
         assert loaded_tracker.is_complete(test_dates["today"])
         assert loaded_tracker.is_complete(test_dates["tomorrow"])
-        assert not loaded_tracker.is_complete("2025-08-22")  # Keep one hardcoded for non-existence test
+        assert not loaded_tracker.is_complete("2099-12-31")  # Far future date that definitely won't be in tracker
 
 
 class TestCurrentUsageMetrics:

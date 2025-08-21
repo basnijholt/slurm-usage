@@ -1700,8 +1700,8 @@ def _display_node_utilization_charts(node_stats: pl.DataFrame, period_days: int)
             pl.col("node").map_elements(safe_get_node_gpus, return_dtype=pl.Int64).alias("est_gpus"),
         )
 
-        # Filter out nodes where we couldn't get GPU info
-        gpu_nodes = gpu_nodes.filter(pl.col("est_gpus").is_not_null())
+        # Filter out nodes where we couldn't get GPU info or have 0 GPUs
+        gpu_nodes = gpu_nodes.filter((pl.col("est_gpus").is_not_null()) & (pl.col("est_gpus") > 0))
 
         # Calculate GPU hours available
         gpu_nodes = gpu_nodes.with_columns(
