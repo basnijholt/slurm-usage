@@ -2135,6 +2135,96 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
     console.print(cluster_summary)
 
 
+def _create_daily_usage_chart(df: pl.DataFrame) -> None:
+    """Create and display daily resource usage bar chart.
+
+    Args:
+        df: DataFrame with job data including start_time or submit_time
+
+    """
+    if df.is_empty():
+        return
+
+    # Extract date from start_time (or submit_time if start_time is null)
+    df_with_date = df.with_columns(
+        pl.when(pl.col("start_time").is_not_null())
+        .then(pl.col("start_time").str.slice(0, 10))  # Extract YYYY-MM-DD
+        .otherwise(pl.col("submit_time").str.slice(0, 10))
+        .alias("job_date"),
+    ).filter(pl.col("job_date").is_not_null())
+
+    if df_with_date.is_empty():
+        return
+
+    # Aggregate by date
+    daily_stats = (
+        df_with_date.group_by("job_date")
+        .agg(
+            [
+                pl.len().alias("job_count"),
+                pl.col("cpu_hours_reserved").sum().alias("cpu_hours"),
+                pl.col("gpu_hours_reserved").sum().alias("gpu_hours"),
+                pl.col("memory_gb_hours_reserved").sum().alias("memory_gb_hours"),
+                pl.col("user").n_unique().alias("unique_users"),
+            ],
+        )
+        .sort("job_date")
+    )
+
+    if daily_stats.is_empty():
+        return
+
+    console.print("\n[bold cyan]═══ Daily Resource Usage ═══[/bold cyan]\n")
+
+    # Display daily usage table
+    daily_table = Table(title="Resource Usage by Day", box=box.ROUNDED)
+    daily_table.add_column("Date", style="cyan")
+    daily_table.add_column("Jobs", justify="right")
+    daily_table.add_column("Users", justify="right")
+    daily_table.add_column("CPU Hours", justify="right", style="yellow")
+    daily_table.add_column("GPU Hours", justify="right", style="green")
+    daily_table.add_column("Memory GB-hrs", justify="right", style="blue")
+
+    for row in daily_stats.tail(14).iter_rows():  # Show last 14 days max
+        daily_table.add_row(
+            row[0],  # date
+            f"{row[1]:,}",  # job_count
+            str(row[5]),  # unique_users
+            f"{row[2]:,.0f}",  # cpu_hours
+            f"{row[3]:,.0f}",  # gpu_hours
+            f"{row[4]:,.0f}",  # memory_gb_hours
+        )
+
+    console.print(daily_table)
+
+    # Create bar chart for CPU hours per day
+    dates = daily_stats["job_date"].to_list()
+    cpu_hours = daily_stats["cpu_hours"].to_list()
+
+    if len(dates) > 1:
+        console.print("\n")
+        _create_bar_chart(
+            dates[-14:],  # Show last 14 days max
+            cpu_hours[-14:],
+            "Daily CPU Hours Usage",
+            width=50,
+            top_n=14,
+            unit="CPU-hrs",
+        )
+
+    # Show GPU usage if any
+    gpu_hours = daily_stats["gpu_hours"].to_list()
+    if any(h > 0 for h in gpu_hours):
+        _create_bar_chart(
+            dates[-14:],
+            gpu_hours[-14:],
+            "Daily GPU Hours Usage",
+            width=50,
+            top_n=14,
+            unit="GPU-hrs",
+        )
+
+
 # ============================================================================
 # CLI Commands
 # ============================================================================
@@ -2297,6 +2387,8 @@ def collect(  # noqa: PLR0912, PLR0915
             console.print(
                 f"\n[cyan]Analyzing {len(df):,} unique jobs from {len(dates_to_collect)} days[/cyan]\n",
             )
+            # Show daily usage trends first
+            _create_daily_usage_chart(df)
             _create_summary_stats(df, config)
 
     console.print("\n[bold green]✓ Collection complete[/bold green]")
@@ -2328,6 +2420,9 @@ def analyze(
         raise typer.Exit(1)
 
     console.print(f"[green]Loaded {len(df):,} unique job records[/green]\n")
+
+    # Show daily usage trends first
+    _create_daily_usage_chart(df)
 
     _create_summary_stats(df, config)
 
