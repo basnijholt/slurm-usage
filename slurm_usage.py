@@ -1434,38 +1434,44 @@ def _extract_node_usage_data(df: pl.DataFrame) -> list[dict[str, float | str]]:
     if jobs_with_nodes.is_empty():
         return []
 
-    node_usage: list[dict[str, float | str]] = []
+    # Vectorized approach: process all rows at once
+    # First, add parsed nodes and node count columns
+    jobs_with_nodes = jobs_with_nodes.with_columns(
+        [
+            pl.col("node_list").map_elements(parse_node_list, return_dtype=pl.List(pl.Utf8)).alias("parsed_nodes"),
+            pl.col("elapsed_seconds").truediv(3600).alias("elapsed_hours"),
+        ],
+    )
 
-    for row in jobs_with_nodes.iter_rows(named=True):
-        nodes = row["node_list"]
-        cpu_hours = row["cpu_hours_reserved"]
-        gpu_hours = row["gpu_hours_reserved"]
-        elapsed_hours = row["elapsed_seconds"] / 3600
+    # Add node count for division
+    jobs_with_nodes = jobs_with_nodes.with_columns(
+        pl.col("parsed_nodes").list.len().alias("num_nodes"),
+    )
 
-        # Use our robust parser to handle all formats including compound ranges
-        parsed_nodes = parse_node_list(nodes)
+    # Filter out rows with no nodes
+    jobs_with_nodes = jobs_with_nodes.filter(pl.col("num_nodes") > 0)
 
-        # Divide hours by number of nodes (job's resources are split across nodes)
-        num_nodes = len(parsed_nodes)
-        if num_nodes > 0:
-            cpu_hours_per_node = cpu_hours / num_nodes
-            gpu_hours_per_node = gpu_hours / num_nodes
-            elapsed_hours_per_node = elapsed_hours / num_nodes
-        else:
-            continue
+    # Calculate per-node resources
+    jobs_with_nodes = jobs_with_nodes.with_columns(
+        [
+            (pl.col("cpu_hours_reserved") / pl.col("num_nodes")).alias("cpu_hours_per_node"),
+            (pl.col("gpu_hours_reserved") / pl.col("num_nodes")).alias("gpu_hours_per_node"),
+            (pl.col("elapsed_hours") / pl.col("num_nodes")).alias("elapsed_hours_per_node"),
+        ],
+    )
 
-        # Add usage data for each parsed node
-        for node in parsed_nodes:
-            node_usage.append(  # noqa: PERF401
-                {
-                    "node": node,
-                    "cpu_hours": cpu_hours_per_node,
-                    "gpu_hours": gpu_hours_per_node,
-                    "elapsed_hours": elapsed_hours_per_node,
-                },
-            )
+    # Explode the parsed_nodes list to create one row per node
+    exploded = jobs_with_nodes.explode("parsed_nodes").select(
+        [
+            pl.col("parsed_nodes").alias("node"),
+            pl.col("cpu_hours_per_node").alias("cpu_hours"),
+            pl.col("gpu_hours_per_node").alias("gpu_hours"),
+            pl.col("elapsed_hours_per_node").alias("elapsed_hours"),
+        ],
+    )
 
-    return node_usage
+    # Convert to list of dicts for compatibility with existing code
+    return exploded.to_dicts()  # type: ignore[no-any-return]
 
 
 # Cache for node information to avoid repeated sinfo calls
