@@ -40,6 +40,7 @@ SLURM's accounting database purges detailed job metrics (CPU usage, memory usage
 - [Smart Re-collection](#smart-re-collection)
   - [Tracked Incomplete States](#tracked-incomplete-states)
 - [Group Configuration](#group-configuration)
+  - [Data Directory](#data-directory)
 - [Automated Collection](#automated-collection)
   - [Using Cron](#using-cron)
   - [Using Systemd Timer](#using-systemd-timer)
