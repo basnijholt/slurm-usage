@@ -549,9 +549,9 @@ class ProcessedJob(BaseModel):
     # Job info
     partition: str
     state: str
-    submit_time: str | None  # ISO format datetime string
-    start_time: str | None  # ISO format datetime string
-    end_time: str | None  # ISO format datetime string
+    submit_time: datetime | None
+    start_time: datetime | None
+    end_time: datetime | None
     node_list: str  # Nodes where job ran
 
     # Resources
@@ -649,9 +649,9 @@ class ProcessedJob(BaseModel):
             job_name=main_job.JobName[:50],
             partition=main_job.Partition,
             state=state,
-            submit_time=submit_dt.isoformat() if submit_dt else None,
-            start_time=start_dt.isoformat() if start_dt else None,
-            end_time=end_dt.isoformat() if end_dt else None,
+            submit_time=submit_dt,
+            start_time=start_dt,
+            end_time=end_dt,
             node_list=main_job.NodeList,
             elapsed_seconds=elapsed_seconds,
             alloc_cpus=alloc_cpus,
@@ -1591,14 +1591,11 @@ def _calculate_analysis_period_days(df: pl.DataFrame) -> int:
         Number of days in the analysis period
 
     """
-    min_date_str = df["submit_time"].min()
-    max_date_str = df["end_time"].max()
+    min_date = df["submit_time"].min()
+    max_date = df["end_time"].max()
 
-    if min_date_str and max_date_str:
-        # Parse ISO format strings to datetime
-        min_date = datetime.fromisoformat(min_date_str)
-        max_date = datetime.fromisoformat(max_date_str)
-        return max((max_date - min_date).days + 1, 1)
+    if min_date and max_date:
+        return int(max((max_date - min_date).days + 1, 1))
 
     return 7  # Default
 
@@ -1812,9 +1809,19 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
     has_reserved_cols = all(col in df.columns for col in ["cpu_hours_reserved", "memory_gb_hours_reserved", "gpu_hours_reserved"])
 
     # Add group column for aggregation
-    df = df.with_columns(
-        pl.col("user").map_elements(lambda u: config.get_user_group(u), return_dtype=pl.Utf8).alias("group"),
+    # OPTIMIZATION: Pre-compute user-to-group mapping for unique users only
+    unique_users = df["user"].unique().to_list()
+    user_group_mapping = {user: config.get_user_group(user) for user in unique_users}
+
+    # Create mapping DataFrame and join
+    mapping_df = pl.DataFrame(
+        {
+            "user": list(user_group_mapping.keys()),
+            "group": list(user_group_mapping.values()),
+        },
     )
+
+    df = df.join(mapping_df, on="user", how="left")
 
     # If we don't have the new columns, calculate them from existing data
     if not has_reserved_cols:
@@ -1831,10 +1838,11 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
         )
 
     # Calculate wait time (in seconds) for jobs that have both submit and start times
+    # Now working with datetime objects directly
     df = df.with_columns(
         pl.when((pl.col("submit_time").is_not_null()) & (pl.col("start_time").is_not_null()))
         .then(
-            (pl.col("start_time").str.to_datetime() - pl.col("submit_time").str.to_datetime()).dt.total_seconds(),
+            (pl.col("start_time") - pl.col("submit_time")).dt.total_seconds(),
         )
         .otherwise(None)
         .alias("wait_seconds"),
@@ -2146,10 +2154,11 @@ def _create_daily_usage_chart(df: pl.DataFrame) -> None:
         return
 
     # Extract date from start_time (or submit_time if start_time is null)
+    # Now working with datetime objects directly
     df_with_date = df.with_columns(
         pl.when(pl.col("start_time").is_not_null())
-        .then(pl.col("start_time").str.slice(0, 10))  # Extract YYYY-MM-DD
-        .otherwise(pl.col("submit_time").str.slice(0, 10))
+        .then(pl.col("start_time").dt.date())  # Extract date from datetime
+        .otherwise(pl.col("submit_time").dt.date())
         .alias("job_date"),
     ).filter(pl.col("job_date").is_not_null())
 
@@ -2187,7 +2196,7 @@ def _create_daily_usage_chart(df: pl.DataFrame) -> None:
 
     for row in daily_stats.tail(14).iter_rows(named=True):  # Show last 14 days max
         daily_table.add_row(
-            row["job_date"],
+            str(row["job_date"]),  # Convert date object to string for display
             f"{row['job_count']:,}",
             str(row["unique_users"]),
             f"{row['cpu_hours']:,.0f}",
@@ -2198,7 +2207,7 @@ def _create_daily_usage_chart(df: pl.DataFrame) -> None:
     console.print(daily_table)
 
     # Create bar chart for CPU hours per day
-    dates = daily_stats["job_date"].to_list()
+    dates = [str(d) for d in daily_stats["job_date"].to_list()]  # Convert dates to strings
     cpu_hours = daily_stats["cpu_hours"].to_list()
 
     if len(dates) > 1:

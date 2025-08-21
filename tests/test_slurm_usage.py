@@ -10,6 +10,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from slurm_usage import current
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT))
 
@@ -103,7 +105,6 @@ def test_main(mock_getuser: MagicMock, mock_subprocess_output: MagicMock) -> Non
     """Test main function (which is actually the current command)."""
     with patch("rich.console.Console.print") as mock_print:
         # The main function is now a callback, we test current instead
-        from slurm_usage import current
 
         current()
         assert mock_print.called
