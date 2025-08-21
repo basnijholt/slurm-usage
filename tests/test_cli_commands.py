@@ -73,7 +73,8 @@ class TestCLICommands:
 
     def test_collect_command_with_summary(self) -> None:
         """Test collect command with summary."""
-        result = runner.invoke(slurm_usage.app, ["collect", "--days", "0"])
+        # Use --days 7 to ensure we get data from our 8-day snapshot range
+        result = runner.invoke(slurm_usage.app, ["collect", "--days", "7"])
         assert result.exit_code == 0
         assert "Resource Usage by User" in result.stdout
         assert "CPU Hours" in result.stdout

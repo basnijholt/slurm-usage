@@ -273,7 +273,7 @@ class TestDataCollection:
         result = slurm_usage._load_recent_data(config, days=7)
         assert result is None
 
-    def test_load_recent_data_corrupted(self, tmp_path: Path, test_dates: dict[str, str], mock_datetime_now: MagicMock) -> None:  # noqa: ARG002
+    def test_load_recent_data_corrupted(self, tmp_path: Path, test_dates: dict[str, str]) -> None:
         """Test loading with corrupted parquet files."""
         config = slurm_usage.Config(data_dir=tmp_path)
         config.ensure_directories_exist()
@@ -327,7 +327,7 @@ class TestCollectCommand:
             min_fetch_count = 3
             assert mock_fetch.call_count >= min_fetch_count
 
-    def test_collect_with_summary(self, tmp_path: Path, test_dates: dict[str, str], mock_datetime_now: MagicMock) -> None:  # noqa: ARG002
+    def test_collect_with_summary(self, tmp_path: Path, test_dates: dict[str, str]) -> None:
         """Test collect command with summary display."""
         # Create some test data first
         config = slurm_usage.Config(data_dir=tmp_path)

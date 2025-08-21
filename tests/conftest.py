@@ -14,21 +14,16 @@ import pytest
 # Enable mock data mode for all tests
 os.environ["SLURM_USE_MOCK_DATA"] = "1"
 
-# Load the reference date from metadata
+# Load the reference date from metadata - fail if not found
 metadata_path = Path(__file__).parent / "snapshots" / "metadata.json"
 if not metadata_path.exists():
-    # Fallback to snapshots_raw if snapshots doesn't exist yet
-    metadata_path = Path(__file__).parent / "snapshots_raw" / "metadata.json"
+    msg = f"Mock data snapshots not found at {metadata_path}. Run 'python tests/capture_snapshots.py' to generate them."
+    raise FileNotFoundError(msg)
 
-if metadata_path.exists():
-    with metadata_path.open() as f:
-        metadata = json.load(f)
-        capture_date_str = metadata["capture_date"]
-        # Parse the capture date (format: "2025-08-20T22:23:09.271561")
-        MOCK_DATA_REFERENCE_DATE = datetime.fromisoformat(capture_date_str).replace(tzinfo=timezone.utc)
-else:
-    # Fallback to a default date for testing
-    MOCK_DATA_REFERENCE_DATE = datetime(2025, 8, 20, 22, 23, 9, tzinfo=timezone.utc)
+with metadata_path.open() as f:
+    metadata = json.load(f)
+    # Get the reference date - the "today" when snapshots were captured
+    MOCK_DATA_REFERENCE_DATE = datetime.strptime(metadata["reference_date"], "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
 
 @pytest.fixture

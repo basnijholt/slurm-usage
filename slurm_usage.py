@@ -219,52 +219,11 @@ class CommandResult(NamedTuple):
 
 def _run(cmd: str | list[str], *, shell: bool = False) -> CommandResult:
     """Run a command or return mock data if configured."""
-    cmd_str = cmd if isinstance(cmd, str) else " ".join(cmd)
-
-    if USE_MOCK_DATA:
-        snapshot_dir = Path(__file__).parent / "tests" / "snapshots"
-        command_map_file = snapshot_dir / "command_map.json"
-        with command_map_file.open() as f:
-            command_map = json.load(f)
-
-        # Try exact matching first
-        if cmd_str in command_map:
-            file_prefix = command_map[cmd_str]
-        # For sacct commands, use date mapping from metadata
-        elif cmd_str.startswith("sacct -a -S "):
-            import re
-
-            # Extract the date from the command
-            date_match = re.search(r"-S (\d{4}-\d{2}-\d{2})T", cmd_str)
-            if date_match:
-                requested_date = date_match.group(1)
-
-                # Load date mapping from metadata
-                metadata_file = snapshot_dir / "metadata.json"
-                with metadata_file.open() as f:
-                    metadata = json.load(f)
-
-                date_mapping = metadata.get("date_to_file_mapping", {})
-                if requested_date in date_mapping:
-                    file_prefix = date_mapping[requested_date]
-                else:
-                    # Date not in our snapshots, return empty result
-                    return CommandResult("", "", 0, cmd_str)
-            else:
-                return CommandResult("", "", 1, cmd_str)
-        else:
-            # Command not found in map
-            return CommandResult("", "", 1, cmd_str)
-
-        stdout_file = snapshot_dir / f"{file_prefix}_output.txt"
-        stdout = stdout_file.read_text()
-        rc_file = snapshot_dir / f"{file_prefix}_returncode.txt"
-        err_file = snapshot_dir / f"{file_prefix}_stderr.txt"
-        returncode = int(rc_file.read_text().strip())
-        stderr = err_file.read_text()
-        return CommandResult(stdout, stderr, returncode, cmd_str)
+    if (r := _maybe_run_mock(cmd)) is not None:
+        return r
 
     # Run the actual command
+    cmd_str = cmd if isinstance(cmd, str) else " ".join(cmd)
     result = subprocess.run(cmd, shell=shell, capture_output=True, text=True, check=False)  # noqa: S603
     return CommandResult(result.stdout, result.stderr, result.returncode, cmd_str)
 
@@ -346,6 +305,86 @@ def run_sacct_version() -> CommandResult:
     """
     cmd = "sacct --version"
     return _run(cmd, shell=True)  # noqa: S604
+
+
+# ============================================================================
+# Mock Data Handling from tests/snapshots
+# ============================================================================
+
+
+def _get_mock_file_prefix(cmd_str: str, command_map: dict[str, str]) -> tuple[str | None, bool]:
+    """Get the mock file prefix for a command.
+
+    Args:
+        cmd_str: The command string to match
+        command_map: Dictionary mapping commands to file prefixes
+
+    Returns:
+        Tuple of (file_prefix, is_sacct_outside_range)
+        - file_prefix: File prefix string if found, None otherwise
+        - is_sacct_outside_range: True if sacct command but date outside snapshot range
+
+    """
+    # Try exact matching first
+    if cmd_str in command_map:
+        return command_map[cmd_str], False
+
+    # For sacct commands, calculate offset from the reference date in metadata
+    if cmd_str.startswith("sacct -a -S "):
+        # Extract the date from the command
+        date_match = re.search(r"-S (\d{4}-\d{2}-\d{2})T", cmd_str)
+        if date_match:
+            requested_date_str = date_match.group(1)
+
+            # Load metadata to get the reference date
+            snapshot_dir = Path(__file__).parent / "tests" / "snapshots"
+            metadata_file = snapshot_dir / "metadata.json"
+            with metadata_file.open() as f:
+                metadata = json.load(f)
+
+            # Get the reference date (the "today" when snapshots were captured)
+            reference_date_str = metadata["reference_date"]
+
+            # Calculate offset from reference date
+            reference_date = datetime.strptime(reference_date_str, "%Y-%m-%d").date()  # noqa: DTZ007
+            requested_date = datetime.strptime(requested_date_str, "%Y-%m-%d").date()  # noqa: DTZ007
+            days_offset = (reference_date - requested_date).days
+
+            # Map to the appropriate sacct_day_N file
+            # We have sacct_day_0 through sacct_day_7 (8 days total)
+            if 0 <= days_offset <= 7:  # noqa: PLR2004
+                return f"sacct_day_{days_offset}", False
+            # Date is outside our snapshot range
+            return None, True
+
+    return None, False
+
+
+def _maybe_run_mock(cmd: str | list[str]) -> CommandResult | None:
+    if USE_MOCK_DATA:
+        cmd_str = cmd if isinstance(cmd, str) else " ".join(cmd)
+        snapshot_dir = Path(__file__).parent / "tests" / "snapshots"
+        command_map_file = snapshot_dir / "command_map.json"
+        with command_map_file.open() as f:
+            command_map = json.load(f)
+
+        file_prefix, is_sacct_outside_range = _get_mock_file_prefix(cmd_str, command_map)
+
+        if file_prefix is None:
+            if is_sacct_outside_range:
+                # sacct command for a date outside our snapshot range - return empty success
+                return CommandResult("", "", 0, cmd_str)
+            # Command not found in map
+            return CommandResult("", "", 1, cmd_str)
+
+        stdout_file = snapshot_dir / f"{file_prefix}_output.txt"
+        stdout = stdout_file.read_text()
+        rc_file = snapshot_dir / f"{file_prefix}_returncode.txt"
+        err_file = snapshot_dir / f"{file_prefix}_stderr.txt"
+        returncode = int(rc_file.read_text().strip())
+        stderr = err_file.read_text()
+        return CommandResult(stdout, stderr, returncode, cmd_str)
+    return None
 
 
 # ============================================================================
