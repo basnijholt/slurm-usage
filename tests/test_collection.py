@@ -140,7 +140,7 @@ class TestDataCollection:
 
     def test_fetch_jobs_for_date(self, tmp_path: Path, test_dates: dict[str, str]) -> None:
         """Test fetching jobs for a specific date."""
-        config = slurm_usage.Config(data_dir=tmp_path)
+        config = slurm_usage.Config.create(data_dir=tmp_path)
         config.ensure_directories_exist()
 
         # Test fetching for a date with mock data
@@ -156,7 +156,7 @@ class TestDataCollection:
 
     def test_fetch_jobs_for_date_with_tracker(self, tmp_path: Path, test_dates: dict[str, str]) -> None:
         """Test fetching jobs with completion tracker."""
-        config = slurm_usage.Config(data_dir=tmp_path)
+        config = slurm_usage.Config.create(data_dir=tmp_path)
         config.ensure_directories_exist()
 
         tracker = slurm_usage.DateCompletionTracker()
@@ -176,7 +176,7 @@ class TestDataCollection:
 
     def test_fetch_jobs_for_date_incremental(self, tmp_path: Path, test_dates: dict[str, str]) -> None:
         """Test incremental job fetching."""
-        config = slurm_usage.Config(data_dir=tmp_path)
+        config = slurm_usage.Config.create(data_dir=tmp_path)
         config.ensure_directories_exist()
 
         # First fetch
@@ -204,7 +204,7 @@ class TestDataCollection:
 
     def test_load_recent_data(self, tmp_path: Path, test_dates: dict[str, str], mock_datetime_now: MagicMock) -> None:  # noqa: ARG002
         """Test loading recent data from multiple days."""
-        config = slurm_usage.Config(data_dir=tmp_path)
+        config = slurm_usage.Config.create(data_dir=tmp_path)
         config.ensure_directories_exist()
 
         # Create test data for multiple days
@@ -241,7 +241,7 @@ class TestDataCollection:
 
     def test_load_recent_data_raw(self, tmp_path: Path, test_dates: dict[str, str], mock_datetime_now: MagicMock) -> None:  # noqa: ARG002
         """Test loading recent raw data."""
-        config = slurm_usage.Config(data_dir=tmp_path)
+        config = slurm_usage.Config.create(data_dir=tmp_path)
         config.ensure_directories_exist()
 
         # Create test raw data
@@ -267,7 +267,7 @@ class TestDataCollection:
 
     def test_load_recent_data_empty(self, tmp_path: Path) -> None:
         """Test loading when no data exists."""
-        config = slurm_usage.Config(data_dir=tmp_path)
+        config = slurm_usage.Config.create(data_dir=tmp_path)
         config.ensure_directories_exist()
 
         result = slurm_usage._load_recent_data(config, days=7)
@@ -275,7 +275,7 @@ class TestDataCollection:
 
     def test_load_recent_data_corrupted(self, tmp_path: Path, test_dates: dict[str, str]) -> None:
         """Test loading with corrupted parquet files."""
-        config = slurm_usage.Config(data_dir=tmp_path)
+        config = slurm_usage.Config.create(data_dir=tmp_path)
         config.ensure_directories_exist()
 
         # Create a corrupted file
@@ -330,7 +330,7 @@ class TestCollectCommand:
     def test_collect_with_summary(self, tmp_path: Path, test_dates: dict[str, str]) -> None:
         """Test collect command with summary display."""
         # Create some test data first
-        config = slurm_usage.Config(data_dir=tmp_path)
+        config = slurm_usage.Config.create(data_dir=tmp_path)
         config.ensure_directories_exist()
 
         date_str = test_dates["today"]

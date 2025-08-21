@@ -33,7 +33,7 @@ from typing import Annotated, Any, NamedTuple
 import polars as pl
 import typer
 import yaml
-from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
@@ -47,7 +47,6 @@ console = Console()
 
 # Use different data directory when using mock data
 USE_MOCK_DATA = os.environ.get("SLURM_USE_MOCK_DATA")
-DATA_DIR = Path(__file__).parent / "tests" / "mock_data" if USE_MOCK_DATA else Path(__file__).parent / "data"
 
 
 @app.callback(invoke_without_command=True)
@@ -106,15 +105,15 @@ INCOMPLETE_JOB_STATES = [
 # ============================================================================
 
 
-def _load_config_file() -> dict[str, Any]:
-    """Load configuration from standard locations.
+def _get_config_path() -> Path | None:
+    """Get the first existing configuration file path.
 
-    Searches for configuration in the following order:
+    Searches in priority order:
     1. $XDG_CONFIG_HOME/slurm-usage/config.yaml
     2. ~/.config/slurm-usage/config.yaml
     3. /etc/slurm-usage/config.yaml
 
-    Returns an empty dict if no configuration file is found.
+    Returns the first existing path, or None if none exist.
     """
     config_paths = []
 
@@ -130,25 +129,40 @@ def _load_config_file() -> dict[str, Any]:
 
     for config_path in config_paths:
         if config_path.exists():
-            try:
-                with open(config_path) as f:
-                    config = yaml.safe_load(f)
-                    if config:
-                        console.print(f"[green]Loaded configuration from {config_path}[/green]")
-                        return config  # type: ignore[no-any-return]
-                    console.print(
-                        f"[yellow]Warning: Empty configuration file at {config_path}[/yellow]",
-                    )
-                    return {}
-            except (OSError, yaml.YAMLError) as e:
-                console.print(f"[yellow]Warning: Failed to load {config_path}: {e}[/yellow]")
-                continue
+            return config_path
 
     console.print("[yellow]No configuration file found. Using defaults.[/yellow]")
     console.print("[dim]Expected locations:[/dim]")
-    for path in config_paths:
-        console.print(f"  [dim]{path}[/dim]")
-    return {}
+    console.print("  [dim]$XDG_CONFIG_HOME/slurm-usage/config.yaml[/dim]")
+    console.print("  [dim]~/.config/slurm-usage/config.yaml[/dim]")
+    console.print("  [dim]/etc/slurm-usage/config.yaml[/dim]")
+    return None
+
+
+def _load_config_file() -> tuple[dict[str, Any], Path | None]:
+    """Load configuration from the first existing config file.
+
+    Returns a tuple of (config dict, config file path).
+    Returns ({}, None) if no configuration file is found.
+    """
+    config_path = _get_config_path()
+
+    if config_path is None:
+        return {}, None
+
+    try:
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+            if config:
+                console.print(f"[green]Loaded configuration from {config_path}[/green]")
+                return config, config_path
+            console.print(
+                f"[yellow]Warning: Empty configuration file at {config_path}[/yellow]",
+            )
+            return {}, config_path
+    except (OSError, yaml.YAMLError) as e:
+        console.print(f"[yellow]Warning: Failed to load {config_path}: {e}[/yellow]")
+        return {}, None
 
 
 class Config(BaseModel):
@@ -157,31 +171,60 @@ class Config(BaseModel):
     Handles both configuration file loading and data directory management.
     """
 
-    data_dir: Path = DATA_DIR
+    data_dir: Path
     groups: dict[str, list[str]] = Field(default_factory=dict)
     user_to_group: dict[str, str] = Field(default_factory=dict, exclude=True)
 
-    # Store the loaded config for future extensibility (excluded from serialization)
-    raw_config: dict[str, Any] = Field(default_factory=dict, exclude=True)
-
-    @model_validator(mode="before")
     @classmethod
-    def load_config_from_file(cls, values: dict[str, Any]) -> dict[str, Any]:
-        """Load configuration from file if groups not provided."""
-        if not values.get("groups"):
-            file_config = _load_config_file()
-            values["groups"] = file_config.get("groups", {})
-            values["raw_config"] = file_config
-        return values
+    def create(cls, data_dir: Path | None = None, groups: dict[str, list[str]] | None = None) -> Config:
+        """Create a Config instance with proper data directory resolution.
 
-    @model_validator(mode="after")
-    def build_user_mapping(self) -> Config:
-        """Build reverse mapping from users to groups after model creation."""
-        self.user_to_group = {}
-        for group, users in self.groups.items():
+        Args:
+            data_dir: Explicit data directory path (overrides all defaults)
+            groups: Explicit groups configuration (overrides config file)
+
+        Returns:
+            Configured Config instance
+
+        """
+        # Load configuration from file
+        file_config, config_path = _load_config_file()
+
+        # Get groups - prefer parameter over config file
+        if groups is None:
+            groups = file_config.get("groups", {})
+
+        # Build user-to-group mapping
+        user_to_group = {}
+        for group, users in groups.items():
             for user in users:
-                self.user_to_group[user] = group
-        return self
+                user_to_group[user] = group
+
+        # Determine data_dir with priority:
+        # 1. Explicit parameter
+        # 2. Config file value
+        # 3. Test mode override
+        # 4. Config-adjacent directory
+        # 5. Current directory
+        if data_dir is None:
+            # Check config file
+            if "data_dir" in file_config and file_config["data_dir"] is not None:
+                data_dir = Path(file_config["data_dir"])
+            # Use test mode directory if in test mode and no explicit config
+            elif USE_MOCK_DATA:
+                data_dir = Path(__file__).parent / "tests" / "mock_data"
+            # Use config-adjacent directory if config file exists
+            elif config_path:
+                data_dir = config_path.parent / "data"
+            # Default to current directory
+            else:
+                data_dir = Path()
+
+        return cls(
+            data_dir=data_dir,
+            groups=groups,
+            user_to_group=user_to_group,
+        )
 
     def get_user_group(self, user: str) -> str:
         """Get the group for a user, returning 'ungrouped' if not found."""
@@ -2112,8 +2155,8 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
 @app.command()
 def collect(  # noqa: PLR0912, PLR0915
     days: Annotated[int, typer.Option("--days", "-d", help="Days to look back")] = 1,
-    data_dir: Annotated[Path, typer.Option("--data-dir", help="Data directory")] = DATA_DIR,
-    show_summary: Annotated[bool, typer.Option("--summary", help="Show summary after collection")] = True,  # noqa: FBT002
+    data_dir: Annotated[Path | None, typer.Option("--data-dir", help="Data directory (default: ./data)")] = None,
+    show_summary: Annotated[bool, typer.Option("--summary/--no-summary", help="Show summary after collection")] = True,  # noqa: FBT002
     n_parallel: Annotated[int, typer.Option("--n-parallel", "-n", help="Number of parallel workers for date-based collection")] = 4,
 ) -> None:
     """Collect job data from SLURM using parallel date-based queries."""
@@ -2130,7 +2173,7 @@ def collect(  # noqa: PLR0912, PLR0915
     _NODE_INFO_CACHE = {}
 
     # Create config and ensure directories exist
-    config = Config(data_dir=data_dir)
+    config = Config.create(data_dir=data_dir)
     config.ensure_directories_exist()
 
     if USE_MOCK_DATA:
@@ -2274,7 +2317,7 @@ def collect(  # noqa: PLR0912, PLR0915
 
 @app.command()
 def analyze(
-    data_dir: Annotated[Path, typer.Option("--data-dir", help="Data directory")] = DATA_DIR,
+    data_dir: Annotated[Path | None, typer.Option("--data-dir", help="Data directory (default: ./data)")] = None,
     days: Annotated[int, typer.Option("--days", "-d", help="Days to analyze")] = 7,
 ) -> None:
     """Analyze collected job data."""
@@ -2289,7 +2332,7 @@ def analyze(
     global _NODE_INFO_CACHE
     _NODE_INFO_CACHE = {}
 
-    config = Config(data_dir=data_dir)
+    config = Config.create(data_dir=data_dir)
     df = _load_recent_data(config, days)
 
     if df is None or df.is_empty():
@@ -2317,12 +2360,12 @@ def analyze(
 
 @app.command()
 def status(
-    data_dir: Annotated[Path, typer.Option("--data-dir", help="Data directory")] = DATA_DIR,
+    data_dir: Annotated[Path | None, typer.Option("--data-dir", help="Data directory (default: ./data)")] = None,
 ) -> None:
     """Show monitoring system status."""
     console.print(Panel.fit("[bold cyan]SLURM Job Monitor Status[/bold cyan]", border_style="cyan"))
 
-    config = Config(data_dir=data_dir)
+    config = Config.create(data_dir=data_dir)
 
     if not config.data_dir.exists():
         console.print("[yellow]No data directory found[/yellow]")
@@ -2461,7 +2504,7 @@ def test() -> None:
     # Test data collection for today
     console.print("\n[cyan]Testing data collection for today...[/cyan]")
 
-    config = Config()
+    config = Config.create()
     config.ensure_directories_exist()
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     raw_records, processed_jobs, is_complete = _fetch_jobs_for_date(

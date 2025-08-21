@@ -190,7 +190,7 @@ class TestConfigAdvanced:
         original_xdg = os.environ.get("XDG_CONFIG_HOME")
         try:
             os.environ["XDG_CONFIG_HOME"] = str(tmp_path / ".config")
-            config = slurm_usage.Config()
+            config = slurm_usage.Config.create()
             assert config.groups == {}
         finally:
             if original_xdg:
@@ -211,7 +211,7 @@ class TestConfigAdvanced:
         original_xdg = os.environ.get("XDG_CONFIG_HOME")
         try:
             os.environ["XDG_CONFIG_HOME"] = str(tmp_path / ".config")
-            config = slurm_usage.Config()
+            config = slurm_usage.Config.create()
             assert config.groups == {}  # Should fall back to empty
         finally:
             if original_xdg:

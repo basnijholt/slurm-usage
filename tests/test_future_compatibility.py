@@ -53,7 +53,7 @@ class TestFutureCompatibility:
             mock_dt.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)  # noqa: DTZ001
 
             # Create config
-            config = slurm_usage.Config(data_dir=tmp_path)
+            config = slurm_usage.Config.create(data_dir=tmp_path)
             config.ensure_directories_exist()
 
             # Fetch jobs for the exact date in our mock data

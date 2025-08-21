@@ -147,7 +147,9 @@ class TestMockDataSystem:
     def test_data_directory_override(self) -> None:
         """Test that data directory is overridden in mock mode."""
         expected = Path(__file__).parent.parent / "tests" / "mock_data"
-        assert expected == slurm_usage.DATA_DIR
+        # Create a Config instance and check its data_dir
+        config = slurm_usage.Config.create()
+        assert expected == config.data_dir
 
     def test_exact_command_matching(self) -> None:
         """Test that exact command matching works."""

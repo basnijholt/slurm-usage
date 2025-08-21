@@ -285,7 +285,7 @@ class TestSummaryStatistics:
         test_dates: dict[str, str],
     ) -> None:
         """Test creating summary statistics."""
-        config = slurm_usage.Config(data_dir=tmp_path)
+        config = slurm_usage.Config.create(data_dir=tmp_path)
 
         # Create test data
         test_data = [
@@ -326,7 +326,7 @@ class TestSummaryStatistics:
     @patch("slurm_usage.console.print")
     def test_create_summary_stats_empty(self, mock_print: MagicMock, tmp_path: Path) -> None:  # noqa: ARG002
         """Test summary stats with empty data."""
-        config = slurm_usage.Config(data_dir=tmp_path)
+        config = slurm_usage.Config.create(data_dir=tmp_path)
         df = pl.DataFrame()
         slurm_usage._create_summary_stats(df, config)
         # Should handle empty data gracefully
@@ -334,7 +334,7 @@ class TestSummaryStatistics:
     @patch("slurm_usage.console.print")
     def test_create_summary_stats_with_groups(self, mock_print: MagicMock, tmp_path: Path, test_dates: dict[str, str]) -> None:
         """Test summary stats with user groups."""
-        config = slurm_usage.Config(
+        config = slurm_usage.Config.create(
             data_dir=tmp_path,
             groups={"group1": ["user1", "user2"], "group2": ["user3"]},
         )
@@ -434,8 +434,9 @@ class TestErrorHandling:
                 return str(self) == str(config_file)
 
             with patch.object(Path, "exists", mock_exists):
-                result = slurm_usage._load_config_file()
+                result, path = slurm_usage._load_config_file()
                 assert result == {}  # Should return empty dict on error
+                assert path is None  # No valid config path due to error
         finally:
             if original_xdg:
                 os.environ["XDG_CONFIG_HOME"] = original_xdg

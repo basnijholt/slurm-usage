@@ -81,11 +81,11 @@ class TestCLICommands:
 
     def test_analyze_command(self, mock_datetime_now: MagicMock) -> None:  # noqa: ARG002
         """Test analyze command."""
-        # First collect some data
-        runner.invoke(slurm_usage.app, ["collect", "--days", "0", "--summary", "False"])
+        # First collect some data that exists in our mock data (days 3-7 ago)
+        runner.invoke(slurm_usage.app, ["collect", "--days", "3", "--no-summary"])
 
         # Then analyze it
-        result = runner.invoke(slurm_usage.app, ["analyze", "--days", "1"])
+        result = runner.invoke(slurm_usage.app, ["analyze", "--days", "7"])
         assert result.exit_code == 0
         assert "Job Efficiency Analysis" in result.stdout
         assert "Resource Usage" in result.stdout
@@ -96,7 +96,7 @@ class TestConfig:
 
     def test_config_default_directories(self) -> None:
         """Test default configuration directories."""
-        config = slurm_usage.Config()
+        config = slurm_usage.Config.create()
 
         # In mock mode, should use test directory
         assert "mock_data" in str(config.data_dir)
@@ -105,7 +105,7 @@ class TestConfig:
 
     def test_config_user_groups(self) -> None:
         """Test user group configuration."""
-        config = slurm_usage.Config(groups={"group1": ["alice", "bob"], "group2": ["charlie"]})
+        config = slurm_usage.Config.create(groups={"group1": ["alice", "bob"], "group2": ["charlie"]})
 
         assert config.get_user_group("alice") == "group1"
         assert config.get_user_group("bob") == "group1"
@@ -114,7 +114,7 @@ class TestConfig:
 
     def test_config_ensure_directories(self) -> None:
         """Test directory creation."""
-        config = slurm_usage.Config()
+        config = slurm_usage.Config.create()
         config.ensure_directories_exist()
 
         assert config.raw_data_dir.exists()

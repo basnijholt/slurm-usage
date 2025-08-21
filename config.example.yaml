@@ -1,0 +1,30 @@
+# Example configuration file for slurm-usage
+# Copy this file to one of the following locations:
+#   - $XDG_CONFIG_HOME/slurm-usage/config.yaml
+#   - ~/.config/slurm-usage/config.yaml
+#   - /etc/slurm-usage/config.yaml (for system-wide configuration)
+
+# Group configuration - organize users into research groups
+groups:
+  physics:
+    - alice
+    - bob
+    - charlie
+  chemistry:
+    - david
+    - eve
+    - frank
+  biology:
+    - grace
+    - henry
+    - irene
+
+# Data directory configuration (optional)
+# - If not specified or set to null, defaults to ./data (relative to script)
+# - Set to an explicit path to use a custom location
+# - Useful for shared installations where data should be stored centrally
+#
+# Examples:
+# data_dir: null                    # Use default ./data directory
+# data_dir: /var/lib/slurm-usage    # System-wide data directory
+# data_dir: /shared/slurm-data      # Shared network location

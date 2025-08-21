@@ -243,11 +243,26 @@ The following job states indicate a job may change and will trigger re-collectio
 
 ## Group Configuration
 
-Create a configuration file to define your organization's research groups. The configuration file is searched in the following locations:
+Create a configuration file to define your organization's research groups and optionally specify the data directory. The configuration file is searched in the following locations:
 
 1. `$XDG_CONFIG_HOME/slurm-usage/config.yaml`
 2. `~/.config/slurm-usage/config.yaml`
 3. `/etc/slurm-usage/config.yaml`
+
+### Data Directory
+
+The data directory for storing collected metrics can be configured in three ways:
+
+1. **Default**: If not specified, data is stored in `./data` (relative to the script location)
+
+2. **Configuration file**: Set `data_dir: /path/to/data` in the config file
+
+3. **Command line**: Use `--data-dir /path/to/data` with any command
+
+This allows flexible deployment:
+- **Default installation**: Data stored alongside the script
+- **System-wide deployment**: Set `data_dir: /var/lib/slurm-usage` in `/etc/slurm-usage/config.yaml`
+- **Shared installations**: Use a network storage path in the config
 
 Example `config.yaml`:
 
@@ -264,6 +279,7 @@ Example `config.yaml`:
 # Example configuration file for slurm-usage
 # Place this file at ~/.config/slurm-usage/config.yaml
 
+data_dir: data  # Directory to store collected data
 groups:
   applications:
     - alice
