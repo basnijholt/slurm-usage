@@ -1414,24 +1414,24 @@ def _fetch_jobs_for_date(  # noqa: PLR0912
 # ============================================================================
 
 
-def _extract_node_usage_data(df: pl.DataFrame) -> list[dict[str, float | str]]:
+def _extract_node_usage_data(df: pl.DataFrame) -> pl.DataFrame:
     """Extract node usage data from job dataframe.
 
     Args:
         df: DataFrame with job data including node_list column
 
     Returns:
-        List of node usage records with node, cpu_hours, gpu_hours, elapsed_hours
+        DataFrame with columns: node, cpu_hours, gpu_hours, elapsed_hours
 
     """
     if df.is_empty() or "node_list" not in df.columns:
-        return []
+        return pl.DataFrame()
 
     # Filter out jobs without node assignments
     jobs_with_nodes = df.filter(pl.col("node_list") != "")
 
     if jobs_with_nodes.is_empty():
-        return []
+        return pl.DataFrame()
 
     # Vectorized approach: process all rows at once
     # First, add parsed nodes and node count columns
@@ -1460,7 +1460,7 @@ def _extract_node_usage_data(df: pl.DataFrame) -> list[dict[str, float | str]]:
     )
 
     # Explode the parsed_nodes list to create one row per node
-    exploded = jobs_with_nodes.explode("parsed_nodes").select(
+    return jobs_with_nodes.explode("parsed_nodes").select(
         [
             pl.col("parsed_nodes").alias("node"),
             pl.col("cpu_hours_per_node").alias("cpu_hours"),
@@ -1468,9 +1468,6 @@ def _extract_node_usage_data(df: pl.DataFrame) -> list[dict[str, float | str]]:
             pl.col("elapsed_hours_per_node").alias("elapsed_hours"),
         ],
     )
-
-    # Convert to list of dicts for compatibility with existing code
-    return exploded.to_dicts()  # type: ignore[no-any-return]
 
 
 # Cache for node information to avoid repeated sinfo calls
@@ -1615,24 +1612,21 @@ def _calculate_analysis_period_days(df: pl.DataFrame) -> int:
 
 
 def _aggregate_node_statistics(
-    node_usage_data: list[dict[str, float | str]],
+    node_df: pl.DataFrame,
     period_days: int,
 ) -> pl.DataFrame:
     """Aggregate node usage data and calculate statistics.
 
     Args:
-        node_usage_data: List of node usage records
+        node_df: DataFrame with node usage data (columns: node, cpu_hours, gpu_hours, elapsed_hours)
         period_days: Number of days in the analysis period
 
     Returns:
         DataFrame with aggregated node statistics including utilization
 
     """
-    if not node_usage_data:
+    if node_df.is_empty():
         return pl.DataFrame()
-
-    # Create DataFrame from node usage
-    node_df = pl.DataFrame(node_usage_data)
 
     # Aggregate by node
     node_stats = (
@@ -1802,12 +1796,12 @@ def _create_node_usage_stats(df: pl.DataFrame) -> None:
     if df.is_empty() or "node_list" not in df.columns:
         return
 
-    console.print(Panel("Node Usage Analysis", style="bold cyan", box=box.DOUBLE_EDGE))
+    console.print(Panel.fit("Node Usage Analysis", style="bold cyan", box=box.DOUBLE_EDGE))
 
     # Step 1: Extract node usage data from jobs
-    node_usage_data = _extract_node_usage_data(df)
+    node_usage_df = _extract_node_usage_data(df)
 
-    if not node_usage_data:
+    if node_usage_df.is_empty():
         console.print("[yellow]No node usage data available[/yellow]")
         return
 
@@ -1815,7 +1809,7 @@ def _create_node_usage_stats(df: pl.DataFrame) -> None:
     period_days = _calculate_analysis_period_days(df)
 
     # Step 3: Aggregate node statistics with utilization calculations
-    node_stats = _aggregate_node_statistics(node_usage_data, period_days)
+    node_stats = _aggregate_node_statistics(node_usage_df, period_days)
 
     if node_stats.is_empty():
         console.print("[yellow]Could not calculate node statistics[/yellow]")
@@ -1900,7 +1894,7 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
     )
 
     # Display per-user resource usage
-    console.print(Panel("Resource Usage by User", style="bold cyan", box=box.DOUBLE_EDGE))
+    console.print(Panel.fit("Resource Usage by User", style="bold cyan", box=box.DOUBLE_EDGE))
 
     user_table = Table(title="Top 15 Users by CPU Hours", box=box.ROUNDED)
     user_table.add_column("User", style="cyan")
@@ -2011,7 +2005,7 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
     groups = group_stats["group"].to_list()
     if len(groups) > 1 or (len(groups) == 1 and groups[0] != "ungrouped"):
         # Display per-group resource usage
-        console.print(Panel("Resource Usage by Group", style="bold cyan", box=box.DOUBLE_EDGE))
+        console.print(Panel.fit("Resource Usage by Group", style="bold cyan", box=box.DOUBLE_EDGE))
 
         group_table = Table(title="Research Group Statistics", box=box.ROUNDED)
         group_table.add_column("Group", style="magenta")
@@ -2071,7 +2065,7 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
     completed = df.filter(pl.col("state") == "COMPLETED")
 
     if not completed.is_empty():
-        console.print(Panel("Efficiency Analysis (Completed Jobs)", style="bold cyan", box=box.DOUBLE_EDGE))
+        console.print(Panel.fit("Efficiency Analysis (Completed Jobs)", style="bold cyan", box=box.DOUBLE_EDGE))
 
         # Calculate stats in one pass
         stats = completed.select(
@@ -2138,7 +2132,7 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:  # noqa: PL
             console.print(waste_table)
 
     # Display cluster-wide summary statistics
-    console.print(Panel("Cluster-Wide Summary", style="bold cyan", box=box.DOUBLE_EDGE))
+    console.print(Panel.fit("Cluster-Wide Summary", style="bold cyan", box=box.DOUBLE_EDGE))
 
     cluster_summary = Table(title="Total Resource Usage", box=box.ROUNDED)
     cluster_summary.add_column("Metric", style="cyan")
@@ -2210,7 +2204,7 @@ def _create_daily_usage_chart(df: pl.DataFrame) -> None:
     if daily_stats.is_empty():
         return
 
-    console.print(Panel("Daily Resource Usage", style="bold cyan", box=box.DOUBLE_EDGE))
+    console.print(Panel.fit("Daily Resource Usage", style="bold cyan", box=box.DOUBLE_EDGE))
 
     # Display daily usage table
     daily_table = Table(title="Resource Usage by Day", box=box.ROUNDED)

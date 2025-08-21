@@ -38,10 +38,10 @@ class TestNodeUsageCalculations:
         result = slurm_usage._extract_node_usage_data(df)
 
         assert len(result) == 1
-        assert result[0]["node"] == "node-001"
-        assert result[0]["cpu_hours"] == 100.0
-        assert result[0]["gpu_hours"] == 10.0
-        assert result[0]["elapsed_hours"] == 1.0
+        assert result["node"][0] == "node-001"
+        assert result["cpu_hours"][0] == 100.0
+        assert result["gpu_hours"][0] == 10.0
+        assert result["elapsed_hours"][0] == 1.0
 
     def test_extract_node_usage_multi_node(self) -> None:
         """Test that multi-node jobs split resources evenly across nodes."""
@@ -59,7 +59,8 @@ class TestNodeUsageCalculations:
 
         assert len(result) == 4
         # Each node should get 1/4 of the resources
-        for i, node_data in enumerate(result):
+        result_dicts = result.to_dicts()
+        for i, node_data in enumerate(result_dicts):
             assert node_data["node"] == f"node00{i+1}"
             assert node_data["cpu_hours"] == 25.0  # 100/4
             assert node_data["gpu_hours"] == 5.0  # 20/4
@@ -77,6 +78,7 @@ class TestNodeUsageCalculations:
         )
 
         result = slurm_usage._extract_node_usage_data(df)
+        result_dicts = result.to_dicts()
 
         # Should have 4 entries total:
         # - 2 for node-001 (from job 1 and job 3)
@@ -85,28 +87,30 @@ class TestNodeUsageCalculations:
         assert len(result) == 4
 
         # Check that node-001 appears twice
-        node_001_entries = [r for r in result if r["node"] == "node-001"]
+        node_001_entries = [r for r in result_dicts if r["node"] == "node-001"]
         assert len(node_001_entries) == 2
 
         # Check split resources for node002 and node003 (no hyphens)
-        node_002 = next(r for r in result if r["node"] == "node002")
+        node_002 = next(r for r in result_dicts if r["node"] == "node002")
         assert node_002["cpu_hours"] == 50.0  # 100/2
         assert node_002["gpu_hours"] == 10.0  # 20/2
 
     def test_aggregate_node_statistics(self) -> None:
         """Test aggregation of node statistics."""
-        # Create sample node usage data
-        node_usage_data: list[dict[str, float | str]] = [
-            {"node": "node-001", "cpu_hours": 10.0, "gpu_hours": 1.0, "elapsed_hours": 1.0},
-            {"node": "node-001", "cpu_hours": 15.0, "gpu_hours": 2.0, "elapsed_hours": 1.5},
-            {"node": "node-002", "cpu_hours": 20.0, "gpu_hours": 0.0, "elapsed_hours": 2.0},
-        ]
+        # Create sample node usage data as DataFrame
+        node_usage_df = pl.DataFrame(
+            [
+                {"node": "node-001", "cpu_hours": 10.0, "gpu_hours": 1.0, "elapsed_hours": 1.0},
+                {"node": "node-001", "cpu_hours": 15.0, "gpu_hours": 2.0, "elapsed_hours": 1.5},
+                {"node": "node-002", "cpu_hours": 20.0, "gpu_hours": 0.0, "elapsed_hours": 2.0},
+            ],
+        )
 
         # Mock the _get_node_cpus function to return consistent values
         with patch("slurm_usage._get_node_cpus") as mock_get_cpus:
             mock_get_cpus.return_value = 64  # Standard node with 64 CPUs
 
-            result = slurm_usage._aggregate_node_statistics(node_usage_data, period_days=7)
+            result = slurm_usage._aggregate_node_statistics(node_usage_df, period_days=7)
 
             assert not result.is_empty()
             assert len(result) == 2  # Two unique nodes
@@ -125,14 +129,16 @@ class TestNodeUsageCalculations:
     def test_cpu_utilization_percentage_bounds(self) -> None:
         """Test that CPU utilization percentages are within reasonable bounds."""
         # Create data that would use 50% of node capacity
-        node_usage_data: list[dict[str, float | str]] = [
-            {"node": "node-001", "cpu_hours": 5376.0, "gpu_hours": 0.0, "elapsed_hours": 84.0},
-        ]
+        node_usage_df = pl.DataFrame(
+            [
+                {"node": "node-001", "cpu_hours": 5376.0, "gpu_hours": 0.0, "elapsed_hours": 84.0},
+            ],
+        )
 
         with patch("slurm_usage._get_node_cpus") as mock_get_cpus:
             mock_get_cpus.return_value = 64
 
-            result = slurm_usage._aggregate_node_statistics(node_usage_data, period_days=7)
+            result = slurm_usage._aggregate_node_statistics(node_usage_df, period_days=7)
 
             # 5376 hours / (64 CPUs * 7 days * 24 hours) = 50%
             utilization = result["cpu_utilization_pct"][0]
@@ -142,14 +148,16 @@ class TestNodeUsageCalculations:
     def test_cpu_utilization_over_100_percent(self) -> None:
         """Test handling of oversubscribed nodes (>100% utilization)."""
         # Create data that would exceed 100% (oversubscription)
-        node_usage_data: list[dict[str, float | str]] = [
-            {"node": "node-001", "cpu_hours": 15000.0, "gpu_hours": 0.0, "elapsed_hours": 168.0},
-        ]
+        node_usage_df = pl.DataFrame(
+            [
+                {"node": "node-001", "cpu_hours": 15000.0, "gpu_hours": 0.0, "elapsed_hours": 168.0},
+            ],
+        )
 
         with patch("slurm_usage._get_node_cpus") as mock_get_cpus:
             mock_get_cpus.return_value = 64
 
-            result = slurm_usage._aggregate_node_statistics(node_usage_data, period_days=7)
+            result = slurm_usage._aggregate_node_statistics(node_usage_df, period_days=7)
 
             # Should allow >100% for oversubscribed nodes
             utilization = result["cpu_utilization_pct"][0]
@@ -158,10 +166,12 @@ class TestNodeUsageCalculations:
 
     def test_node_missing_cpu_info(self) -> None:
         """Test handling of nodes where CPU info cannot be retrieved."""
-        node_usage_data: list[dict[str, float | str]] = [
-            {"node": "node-001", "cpu_hours": 100.0, "gpu_hours": 10.0, "elapsed_hours": 10.0},
-            {"node": "node-bad", "cpu_hours": 50.0, "gpu_hours": 5.0, "elapsed_hours": 5.0},
-        ]
+        node_usage_df = pl.DataFrame(
+            [
+                {"node": "node-001", "cpu_hours": 100.0, "gpu_hours": 10.0, "elapsed_hours": 10.0},
+                {"node": "node-bad", "cpu_hours": 50.0, "gpu_hours": 5.0, "elapsed_hours": 5.0},
+            ],
+        )
 
         def mock_get_cpus(node_name: str) -> int:
             if node_name == "node-bad":
@@ -170,7 +180,7 @@ class TestNodeUsageCalculations:
             return 64
 
         with patch("slurm_usage._get_node_cpus", side_effect=mock_get_cpus):
-            result = slurm_usage._aggregate_node_statistics(node_usage_data, period_days=7)
+            result = slurm_usage._aggregate_node_statistics(node_usage_df, period_days=7)
 
             # Should have both nodes - node-bad with null CPU info
             assert len(result) == 2
@@ -212,16 +222,18 @@ class TestNodeUsageCalculations:
 
     def test_job_count_is_integer(self) -> None:
         """Test that job counts are always integers, not decimals."""
-        node_usage_data: list[dict[str, float | str]] = [
-            {"node": "node-001", "cpu_hours": 10.5, "gpu_hours": 1.5, "elapsed_hours": 1.25},
-            {"node": "node-001", "cpu_hours": 15.3, "gpu_hours": 2.7, "elapsed_hours": 1.75},
-            {"node": "node-001", "cpu_hours": 8.2, "gpu_hours": 0.8, "elapsed_hours": 0.5},
-        ]
+        node_usage_df = pl.DataFrame(
+            [
+                {"node": "node-001", "cpu_hours": 10.5, "gpu_hours": 1.5, "elapsed_hours": 1.25},
+                {"node": "node-001", "cpu_hours": 15.3, "gpu_hours": 2.7, "elapsed_hours": 1.75},
+                {"node": "node-001", "cpu_hours": 8.2, "gpu_hours": 0.8, "elapsed_hours": 0.5},
+            ],
+        )
 
         with patch("slurm_usage._get_node_cpus") as mock_get_cpus:
             mock_get_cpus.return_value = 64
 
-            result = slurm_usage._aggregate_node_statistics(node_usage_data, period_days=7)
+            result = slurm_usage._aggregate_node_statistics(node_usage_df, period_days=7)
 
             # Job count should be an integer (3 jobs)
             job_count = result["job_count"][0]
@@ -230,9 +242,11 @@ class TestNodeUsageCalculations:
 
     def test_gpu_node_utilization(self) -> None:
         """Test GPU utilization calculation for GPU nodes."""
-        node_usage_data: list[dict[str, float | str]] = [
-            {"node": "gpu-001", "cpu_hours": 100.0, "gpu_hours": 50.0, "elapsed_hours": 10.0},
-        ]
+        node_usage_df = pl.DataFrame(
+            [
+                {"node": "gpu-001", "cpu_hours": 100.0, "gpu_hours": 50.0, "elapsed_hours": 10.0},
+            ],
+        )
 
         with (
             patch("slurm_usage._get_node_cpus") as mock_get_cpus,
@@ -243,7 +257,7 @@ class TestNodeUsageCalculations:
 
             # Need to patch _display_node_utilization_charts internals
             # This is complex, so we'll just verify the data is reasonable
-            result = slurm_usage._aggregate_node_statistics(node_usage_data, period_days=7)
+            result = slurm_usage._aggregate_node_statistics(node_usage_df, period_days=7)
 
             assert result["total_gpu_hours"][0] == 50.0
             # GPU hours available = 4 GPUs * 7 days * 24 hours = 672
@@ -260,7 +274,7 @@ class TestNodeUsageCalculations:
             },
         )
 
-        result = slurm_usage._extract_node_usage_data(df)
+        result = slurm_usage._extract_node_usage_data(df).to_dicts()
 
         assert len(result) == 1
         assert result[0]["cpu_hours"] == 0.0
@@ -279,7 +293,7 @@ class TestNodeUsageCalculations:
             },
         )
 
-        result = slurm_usage._extract_node_usage_data(df)
+        result = slurm_usage._extract_node_usage_data(df).to_dicts()
 
         assert len(result) == 100
         # Each node gets 1/100 of resources

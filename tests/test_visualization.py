@@ -91,30 +91,33 @@ class TestNodeUsageAnalysis:
 
         df = pl.DataFrame(test_data)
         result = slurm_usage._extract_node_usage_data(df)
+        result_dicts = result.to_dicts()
 
         # Should have 3 nodes (node-001, node-002, node-003)
         expected_nodes = 3
         assert len(result) == expected_nodes
-        assert result[0]["node"] == "node-001"
-        assert result[1]["node"] == "node-002"
-        assert result[2]["node"] == "node-003"
+        assert result_dicts[0]["node"] == "node-001"
+        assert result_dicts[1]["node"] == "node-002"
+        assert result_dicts[2]["node"] == "node-003"
 
     def test_extract_node_usage_data_empty(self) -> None:
         """Test extracting node usage data from empty DataFrame."""
         df = pl.DataFrame()
         result = slurm_usage._extract_node_usage_data(df)
-        assert result == []
+        assert result.is_empty()
 
     def test_aggregate_node_statistics(self) -> None:
         """Test aggregating node statistics."""
-        node_usage_data: list[dict[str, float | str]] = [
-            {"node": "node-001", "cpu_hours": 10.0, "gpu_hours": 2.0, "elapsed_hours": 1.0},
-            {"node": "node-001", "cpu_hours": 15.0, "gpu_hours": 0.0, "elapsed_hours": 1.5},
-            {"node": "node-002", "cpu_hours": 20.0, "gpu_hours": 4.0, "elapsed_hours": 2.0},
-        ]
+        node_usage_df = pl.DataFrame(
+            [
+                {"node": "node-001", "cpu_hours": 10.0, "gpu_hours": 2.0, "elapsed_hours": 1.0},
+                {"node": "node-001", "cpu_hours": 15.0, "gpu_hours": 0.0, "elapsed_hours": 1.5},
+                {"node": "node-002", "cpu_hours": 20.0, "gpu_hours": 4.0, "elapsed_hours": 2.0},
+            ],
+        )
 
         with patch("slurm_usage._get_node_cpus", return_value=64):
-            result = slurm_usage._aggregate_node_statistics(node_usage_data, period_days=1)
+            result = slurm_usage._aggregate_node_statistics(node_usage_df, period_days=1)
 
             assert not result.is_empty()
             expected_unique_nodes = 2
@@ -129,7 +132,7 @@ class TestNodeUsageAnalysis:
 
     def test_aggregate_node_statistics_empty(self) -> None:
         """Test aggregating empty node statistics."""
-        result = slurm_usage._aggregate_node_statistics([], period_days=1)
+        result = slurm_usage._aggregate_node_statistics(pl.DataFrame(), period_days=1)
         assert result.is_empty()
 
     def test_calculate_analysis_period_days(self, test_dates: dict[str, str]) -> None:
@@ -235,9 +238,11 @@ class TestNodeUsageAnalysis:
     ) -> None:
         """Test the main node usage stats function."""
         # Setup mocks
-        mock_extract.return_value = [
-            {"node": "node-001", "cpu_hours": 10.0, "gpu_hours": 0.0, "elapsed_hours": 1.0},
-        ]
+        mock_extract.return_value = pl.DataFrame(
+            [
+                {"node": "node-001", "cpu_hours": 10.0, "gpu_hours": 0.0, "elapsed_hours": 1.0},
+            ],
+        )
         mock_aggregate.return_value = pl.DataFrame(
             {"node": ["node-001"], "total_cpu_hours": [10.0]},
         )
