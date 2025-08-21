@@ -18,6 +18,9 @@ SLURM's accounting database purges detailed job metrics (CPU usage, memory usage
 - ⏰ **Cron-ready** - designed for automated daily collection
 - 🎯 **Intelligent re-collection** - only re-fetches incomplete job states
 
+
+<details><summary>Table of Contents</summary>
+
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
@@ -53,6 +56,8 @@ SLURM's accounting database purges detailed job metrics (CPU usage, memory usage
 - [License](#license)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
+</details>
 
 ## What It Collects
 
