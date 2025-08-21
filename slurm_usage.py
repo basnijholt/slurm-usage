@@ -2360,27 +2360,23 @@ def collect(  # noqa: PLR0912, PLR0915
                 date_str = future_to_date[future]
                 try:
                     result = future.result()
-                    raw_records = result.raw_records
-                    processed_jobs = result.processed_jobs
-                    is_complete = result.is_complete
-
-                    if raw_records:
+                    if result.raw_records:
                         # Save raw data (keeping for archival - SLURM might purge old data)
                         raw_file = config.raw_data_dir / f"{date_str}.parquet"
-                        raw_df = pl.DataFrame([r.model_dump() for r in raw_records])
+                        raw_df = pl.DataFrame([r.model_dump() for r in result.raw_records])
                         raw_df.write_parquet(raw_file)
-                        total_raw += len(raw_records)
+                        total_raw += len(result.raw_records)
 
                     # Always ensure processed file exists if we have any data (raw or processed)
                     processed_file = config.processed_data_dir / f"{date_str}.parquet"
                     raw_file = config.raw_data_dir / f"{date_str}.parquet"
 
-                    if processed_jobs:
+                    if result.processed_jobs:
                         # We have new processed jobs to save/merge
                         if processed_file.exists():
                             # Load existing data
                             existing_df = pl.read_parquet(processed_file)
-                            new_df = _processed_jobs_to_dataframe(processed_jobs)
+                            new_df = _processed_jobs_to_dataframe(result.processed_jobs)
 
                             # Merge: keep the most recent version of each job
                             # This updates job states for existing jobs and adds new ones
@@ -2393,27 +2389,31 @@ def collect(  # noqa: PLR0912, PLR0915
                             total_processed += len(new_df) - len(existing_df) + len(merged_df)
                         else:
                             # First time collecting this date
-                            _save_processed_jobs_to_parquet(processed_jobs, processed_file)
-                            total_processed += len(processed_jobs)
+                            _save_processed_jobs_to_parquet(result.processed_jobs, processed_file)
+                            total_processed += len(result.processed_jobs)
 
                         successful_dates.append(date_str)
                     elif not processed_file.exists() and raw_file.exists():
                         # No new jobs, but we have a raw file and no processed file
                         # Process the raw file to create the processed file
-                        raw_records = _load_raw_records_from_parquet(raw_file, date_str)
-                        if raw_records:
-                            jobs, _ = _process_raw_records_into_jobs(raw_records)
+                        loaded_raw_records = _load_raw_records_from_parquet(raw_file, date_str)
+                        if loaded_raw_records:
+                            jobs, _ = _process_raw_records_into_jobs(loaded_raw_records)
                             if jobs:
                                 _save_processed_jobs_to_parquet(jobs, processed_file)
                                 total_processed += len(jobs)
 
-                    if is_complete:
+                    if result.is_complete:
                         completed_dates += 1
                         status_icon = "✓"
                     else:
                         status_icon = "↻"
 
-                    status = f"[green]{len(processed_jobs)} jobs {status_icon}[/green]" if processed_jobs else f"[dim]skipped {status_icon}[/dim]"
+                    status = (
+                        f"[green]{len(result.processed_jobs)} jobs {status_icon}[/green]"
+                        if result.processed_jobs
+                        else f"[dim]skipped {status_icon}[/dim]"
+                    )
                     progress.update(task, advance=1, description=f"Collected {date_str}: {status}")
 
                 except Exception as e:  # noqa: BLE001
