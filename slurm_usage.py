@@ -781,7 +781,7 @@ def _parse_datetime(date_str: str | None) -> datetime | None:
         return None
     try:
         # SLURM uses ISO format: 2025-08-19T10:30:00
-        return datetime.fromisoformat(date_str.replace("T", " "))
+        return datetime.fromisoformat(date_str)
     except (ValueError, AttributeError):
         return None
 
@@ -1601,8 +1601,8 @@ def _calculate_analysis_period_days(df: pl.DataFrame) -> int:
 
     if min_date_str and max_date_str:
         # Parse ISO format strings to datetime
-        min_date = datetime.fromisoformat(min_date_str.replace("T", " "))
-        max_date = datetime.fromisoformat(max_date_str.replace("T", " "))
+        min_date = datetime.fromisoformat(min_date_str)
+        max_date = datetime.fromisoformat(max_date_str)
         return max((max_date - min_date).days + 1, 1)
 
     return 7  # Default
