@@ -61,7 +61,7 @@ class TestNodeUsageCalculations:
         # Each node should get 1/4 of the resources
         result_dicts = result.to_dicts()
         for i, node_data in enumerate(result_dicts):
-            assert node_data["node"] == f"node00{i+1}"
+            assert node_data["node"] == f"node00{i + 1}"
             assert node_data["cpu_hours"] == 25.0  # 100/4
             assert node_data["gpu_hours"] == 5.0  # 20/4
             assert node_data["elapsed_hours"] == 0.5  # 2/4
