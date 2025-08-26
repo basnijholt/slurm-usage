@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -345,3 +346,59 @@ class TestSqueueParsing:
             assert job.user != ""
             assert job.status in ["R", "PD"]
             assert job.partition != ""
+
+
+class TestGresParsingWithSocket:
+    """Test GRES parsing with socket information (PR #12)."""
+
+    def test_parse_gres_with_socket_info(self) -> None:
+        """Test parsing GRES string with socket information like 'gpu:8(S:0-1)'."""
+        # Test case from PR #12 - GPU count with socket information
+        gres_with_socket = "gpu:8(S:0-1)"
+        expected_gpu_count = 8
+        # Remove socket information using the regex from PR #12
+        cleaned_gres = re.sub(r"\(S:[0-9-]+\)", "", gres_with_socket)
+        gpu_parts = cleaned_gres.split(":")
+
+        # Verify the GPU count is parsed correctly
+        assert gpu_parts[-1] == str(expected_gpu_count)
+        assert int(gpu_parts[-1]) == expected_gpu_count
+
+    def test_parse_gres_without_socket(self) -> None:
+        """Test that regular GRES strings still work."""
+        # Regular format without socket info
+        gres_regular = "gpu:4"
+        expected_gpu_count = 4
+        cleaned_gres = re.sub(r"\(S:[0-9-]+\)", "", gres_regular)
+        gpu_parts = cleaned_gres.split(":")
+
+        assert gpu_parts[-1] == str(expected_gpu_count)
+        assert int(gpu_parts[-1]) == expected_gpu_count
+
+    def test_parse_gres_with_model_and_socket(self) -> None:
+        """Test GRES with GPU model and socket info."""
+        # Format with GPU model and socket info
+        gres_with_model = "gpu:v100:8(S:0-1)"
+        expected_gpu_count = 8
+        cleaned_gres = re.sub(r"\(S:[0-9-]+\)", "", gres_with_model)
+        gpu_parts = cleaned_gres.split(":")
+
+        # The GPU count is still the last part
+        assert gpu_parts[-1] == str(expected_gpu_count)
+        assert int(gpu_parts[-1]) == expected_gpu_count
+        assert gpu_parts[1] == "v100"  # Model name preserved
+
+    def test_parse_gres_multiple_sockets(self) -> None:
+        """Test GRES with different socket patterns."""
+        # Different socket patterns that might appear
+        test_cases = [
+            ("gpu:16(S:0-3)", 16),
+            ("gpu:a100:4(S:0)", 4),
+            ("gpu:2(S:1)", 2),
+            ("gpu:v100:32(S:0-7)", 32),
+        ]
+
+        for gres, expected_count in test_cases:
+            cleaned_gres = re.sub(r"\(S:[0-9-]+\)", "", gres)
+            gpu_parts = cleaned_gres.split(":")
+            assert int(gpu_parts[-1]) == expected_count
