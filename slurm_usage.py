@@ -1559,8 +1559,8 @@ def _get_node_info_from_slurm() -> dict[str, dict[str, int]]:  # noqa: PLR0912
 
                         # Parse GRES string (e.g., "gpu:4" or "gpu:v100:4")
                         if "gpu:" in gres:
-                            # Handle formats like "gpu:4" or "gpu:v100:4"
-                            gpu_parts = gres.split(":")
+                            # Handle formats like "gpu:4" or "gpu:v100:4" of "gpu:8(S:0-1)"
+                            gpu_parts = re.sub("\\(S:[0-9-]+\\)", "", gres).split(":")
                             # The GPU count is always the last number
                             if gpu_parts and gpu_parts[-1].isdigit():
                                 gpu_count = int(gpu_parts[-1])
