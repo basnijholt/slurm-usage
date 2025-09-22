@@ -413,18 +413,20 @@ class TestDatetimeSchemaConsistency:
     def test_ensure_utc_datetimes(self) -> None:
         """Test that _ensure_utc_datetimes converts all datetime columns to UTC."""
         # Create DataFrame with mixed datetime schemas
-        df = pl.DataFrame({
-            "job_id": ["job1", "job2"],
-            "naive_datetime": [
-                datetime(2025, 9, 20, 10, 0, 0),
-                datetime(2025, 9, 20, 11, 0, 0),
-            ],
-            "utc_datetime": [
-                datetime(2025, 9, 20, 10, 0, 0, tzinfo=timezone.utc),
-                datetime(2025, 9, 20, 11, 0, 0, tzinfo=timezone.utc),
-            ],
-            "value": [1.0, 2.0],
-        })
+        df = pl.DataFrame(
+            {
+                "job_id": ["job1", "job2"],
+                "naive_datetime": [
+                    datetime(2025, 9, 20, 10, 0, 0),
+                    datetime(2025, 9, 20, 11, 0, 0),
+                ],
+                "utc_datetime": [
+                    datetime(2025, 9, 20, 10, 0, 0, tzinfo=timezone.utc),
+                    datetime(2025, 9, 20, 11, 0, 0, tzinfo=timezone.utc),
+                ],
+                "value": [1.0, 2.0],
+            }
+        )
 
         # Apply the function
         result = slurm_usage._ensure_utc_datetimes(df)
@@ -475,7 +477,7 @@ class TestDatetimeSchemaConsistency:
             cpu_hours_reserved=2.0,
             memory_gb_hours_reserved=4.0,
             gpu_hours_reserved=1.0,
-            is_complete=True
+            is_complete=True,
         )
 
         # Convert to DataFrame
@@ -517,23 +519,27 @@ class TestDatetimeSchemaConsistency:
             processed_dir.mkdir(parents=True, exist_ok=True)
 
             # DataFrame with different columns
-            df1 = pl.DataFrame({
-                "job_id": ["job1"],
-                "user": ["alice"],
-                "cpu_hours_used": [1.0],
-                "processed_date": [datetime(2025, 9, 20, 10, 0, 0)],
-                "is_complete": [True],
-            })
+            df1 = pl.DataFrame(
+                {
+                    "job_id": ["job1"],
+                    "user": ["alice"],
+                    "cpu_hours_used": [1.0],
+                    "processed_date": [datetime(2025, 9, 20, 10, 0, 0)],
+                    "is_complete": [True],
+                }
+            )
 
             # DataFrame with additional column
-            df2 = pl.DataFrame({
-                "job_id": ["job2"],
-                "user": ["bob"],
-                "cpu_hours_used": [2.0],
-                "gpu_hours_used": [0.5],  # Additional column
-                "processed_date": [datetime(2025, 9, 21, 10, 0, 0)],
-                "is_complete": [True],
-            })
+            df2 = pl.DataFrame(
+                {
+                    "job_id": ["job2"],
+                    "user": ["bob"],
+                    "cpu_hours_used": [2.0],
+                    "gpu_hours_used": [0.5],  # Additional column
+                    "processed_date": [datetime(2025, 9, 21, 10, 0, 0)],
+                    "is_complete": [True],
+                }
+            )
 
             df1.write_parquet(processed_dir / "2025-09-20.parquet")
             df2.write_parquet(processed_dir / "2025-09-21.parquet")
@@ -560,18 +566,21 @@ class TestDatetimeSchemaConsistency:
 
             # Use today's date for the filename
             from datetime import date
+
             today = date.today()
 
             # DataFrame with multiple datetime columns
-            df = pl.DataFrame({
-                "job_id": ["job1"],
-                "user": ["alice"],
-                "submit_time": [datetime(2025, 9, 20, 9, 0, 0)],  # Naive
-                "start_time": [datetime(2025, 9, 20, 10, 0, 0, tzinfo=timezone.utc)],  # UTC
-                "end_time": [datetime(2025, 9, 20, 11, 0, 0)],  # Naive
-                "processed_date": [datetime(2025, 9, 20, 12, 0, 0)],  # Naive
-                "is_complete": [True],
-            })
+            df = pl.DataFrame(
+                {
+                    "job_id": ["job1"],
+                    "user": ["alice"],
+                    "submit_time": [datetime(2025, 9, 20, 9, 0, 0)],  # Naive
+                    "start_time": [datetime(2025, 9, 20, 10, 0, 0, tzinfo=timezone.utc)],  # UTC
+                    "end_time": [datetime(2025, 9, 20, 11, 0, 0)],  # Naive
+                    "processed_date": [datetime(2025, 9, 20, 12, 0, 0)],  # Naive
+                    "is_complete": [True],
+                }
+            )
 
             df.write_parquet(processed_dir / f"{today}.parquet")
 

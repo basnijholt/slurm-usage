@@ -1334,6 +1334,7 @@ def _ensure_utc_datetimes(df: pl.DataFrame) -> pl.DataFrame:
 
     Returns:
         DataFrame with all datetime columns as UTC timezone-aware
+
     """
     for col in df.columns:
         if isinstance(df[col].dtype, pl.Datetime):
