@@ -1145,6 +1145,16 @@ def _load_recent_data(
     for f in parquet_files:
         try:
             df = pl.read_parquet(f)
+            # Ensure consistent datetime schema - convert to UTC if needed
+            for col in df.columns:
+                col_type = df[col].dtype
+                # Check if it's a datetime type
+                if isinstance(col_type, pl.Datetime):
+                    # Convert to timezone-aware UTC datetime
+                    if col_type.time_zone is None:
+                        df = df.with_columns(pl.col(col).dt.replace_time_zone("UTC"))
+                    elif col_type.time_zone != "UTC":
+                        df = df.with_columns(pl.col(col).dt.convert_time_zone("UTC"))
             dfs.append(df)
         except (OSError, pl.exceptions.ComputeError) as e:  # noqa: PERF203
             console.print(f"[yellow]Warning: Could not read {f}: {e}[/yellow]")
@@ -1153,7 +1163,8 @@ def _load_recent_data(
     if not dfs:
         return None
 
-    combined = pl.concat(dfs)
+    # Use diagonal concat to handle schema differences more gracefully
+    combined = pl.concat(dfs, how="diagonal_relaxed")
 
     # Deduplicate by job_id if processing processed data
     if data_type == "processed" and "job_id" in combined.columns:

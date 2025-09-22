@@ -5,8 +5,11 @@ from __future__ import annotations
 import os
 import re
 import sys
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
+import polars as pl
 import pytest
 
 # Add parent directory to path
@@ -402,3 +405,162 @@ class TestGresParsingWithSocket:
             cleaned_gres = re.sub(r"\(S:[0-9-]+\)", "", gres)
             gpu_parts = cleaned_gres.split(":")
             assert int(gpu_parts[-1]) == expected_count
+
+
+class TestDatetimeSchemaConsistency:
+    """Test datetime schema consistency when loading and concatenating data."""
+
+    def test_load_recent_data_with_mixed_datetime_schemas(self) -> None:
+        """Test that _load_recent_data handles mixed datetime schemas correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create config with temp directory
+            config = slurm_usage.Config(
+                data_dir=Path(tmpdir),
+                groups={},
+                user_to_group={},
+            )
+
+            # Create processed subdirectory
+            processed_dir = Path(tmpdir) / "processed"
+            processed_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create test data with different datetime schemas
+            # DataFrame 1: UTC timezone-aware datetime
+            df1 = pl.DataFrame({
+                "job_id": ["job1", "job2"],
+                "user": ["alice", "bob"],
+                "cpu_hours_used": [1.0, 2.0],
+                "processed_date": [
+                    datetime(2025, 9, 20, 10, 0, 0, tzinfo=timezone.utc),
+                    datetime(2025, 9, 20, 11, 0, 0, tzinfo=timezone.utc),
+                ],
+                "is_complete": [True, True],
+            })
+
+            # DataFrame 2: Naive datetime (no timezone)
+            df2 = pl.DataFrame({
+                "job_id": ["job3", "job4"],
+                "user": ["charlie", "dave"],
+                "cpu_hours_used": [3.0, 4.0],
+                "processed_date": [
+                    datetime(2025, 9, 21, 10, 0, 0),
+                    datetime(2025, 9, 21, 11, 0, 0),
+                ],
+                "is_complete": [True, True],
+            })
+
+            # Save DataFrames as parquet files
+            df1.write_parquet(processed_dir / "2025-09-20.parquet")
+            df2.write_parquet(processed_dir / "2025-09-21.parquet")
+
+            # Load data using the function
+            result = slurm_usage._load_recent_data(config, days=2)
+
+            # Verify the data was loaded and concatenated successfully
+            assert result is not None
+            assert len(result) == 4
+            assert "job_id" in result.columns
+            assert "processed_date" in result.columns
+
+            # Check that all datetime columns are now UTC timezone-aware
+            date_col_type = result["processed_date"].dtype
+            assert isinstance(date_col_type, pl.Datetime)
+            assert date_col_type.time_zone == "UTC"
+
+    def test_load_recent_data_handles_empty_directory(self) -> None:
+        """Test that _load_recent_data handles empty directory gracefully."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = slurm_usage.Config(
+                data_dir=Path(tmpdir),
+                groups={},
+                user_to_group={},
+            )
+
+            processed_dir = Path(tmpdir) / "processed"
+            processed_dir.mkdir(parents=True, exist_ok=True)
+
+            # Should return None for empty directory
+            result = slurm_usage._load_recent_data(config, days=1)
+            assert result is None
+
+    def test_diagonal_concat_handles_schema_differences(self) -> None:
+        """Test that diagonal_relaxed concat handles schema differences gracefully."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = slurm_usage.Config(
+                data_dir=Path(tmpdir),
+                groups={},
+                user_to_group={},
+            )
+
+            processed_dir = Path(tmpdir) / "processed"
+            processed_dir.mkdir(parents=True, exist_ok=True)
+
+            # DataFrame with different columns
+            df1 = pl.DataFrame({
+                "job_id": ["job1"],
+                "user": ["alice"],
+                "cpu_hours_used": [1.0],
+                "processed_date": [datetime(2025, 9, 20, 10, 0, 0)],
+                "is_complete": [True],
+            })
+
+            # DataFrame with additional column
+            df2 = pl.DataFrame({
+                "job_id": ["job2"],
+                "user": ["bob"],
+                "cpu_hours_used": [2.0],
+                "gpu_hours_used": [0.5],  # Additional column
+                "processed_date": [datetime(2025, 9, 21, 10, 0, 0)],
+                "is_complete": [True],
+            })
+
+            df1.write_parquet(processed_dir / "2025-09-20.parquet")
+            df2.write_parquet(processed_dir / "2025-09-21.parquet")
+
+            # Should handle schema differences with diagonal_relaxed
+            result = slurm_usage._load_recent_data(config, days=2)
+
+            assert result is not None
+            assert len(result) == 2
+            # The gpu_hours_used column should exist with null for first row
+            assert "gpu_hours_used" in result.columns
+
+    def test_multiple_datetime_columns_converted(self) -> None:
+        """Test that all datetime columns are converted to UTC."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = slurm_usage.Config(
+                data_dir=Path(tmpdir),
+                groups={},
+                user_to_group={},
+            )
+
+            processed_dir = Path(tmpdir) / "processed"
+            processed_dir.mkdir(parents=True, exist_ok=True)
+
+            # Use today's date for the filename
+            from datetime import date
+            today = date.today()
+
+            # DataFrame with multiple datetime columns
+            df = pl.DataFrame({
+                "job_id": ["job1"],
+                "user": ["alice"],
+                "submit_time": [datetime(2025, 9, 20, 9, 0, 0)],  # Naive
+                "start_time": [datetime(2025, 9, 20, 10, 0, 0, tzinfo=timezone.utc)],  # UTC
+                "end_time": [datetime(2025, 9, 20, 11, 0, 0)],  # Naive
+                "processed_date": [datetime(2025, 9, 20, 12, 0, 0)],  # Naive
+                "is_complete": [True],
+            })
+
+            df.write_parquet(processed_dir / f"{today}.parquet")
+
+            result = slurm_usage._load_recent_data(config, days=1)
+
+            assert result is not None
+
+            # Check all datetime columns are UTC
+            for col in ["submit_time", "start_time", "end_time", "processed_date"]:
+                if col in result.columns:
+                    col_type = result[col].dtype
+                    if isinstance(col_type, pl.Datetime):
+                        assert col_type.time_zone == "UTC", f"Column {col} should be UTC"
