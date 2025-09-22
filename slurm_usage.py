@@ -43,6 +43,8 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 UTC = timezone.utc
+# Preserve the original datetime class for type mapping even when patched in tests
+_DATETIME_TYPE = datetime
 
 app = typer.Typer(help="SLURM Job Monitor - Collect and analyze job efficiency metrics")
 console = Console()
@@ -682,7 +684,7 @@ class ProcessedJob(BaseModel):
             float: pl.Float64,
             bool: pl.Boolean,
             # All datetime fields should be UTC
-            datetime: pl.Datetime("us", "UTC"),
+            _DATETIME_TYPE: pl.Datetime("us", "UTC"),
         }
 
         schema = {}
