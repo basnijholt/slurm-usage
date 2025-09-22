@@ -24,6 +24,8 @@ import json
 import os
 import re
 import subprocess
+import types
+import typing
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
@@ -42,6 +44,8 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 UTC = timezone.utc
+# Preserve the original datetime class for type mapping even when patched in tests
+_DATETIME_TYPE = datetime
 
 app = typer.Typer(help="SLURM Job Monitor - Collect and analyze job efficiency metrics")
 console = Console()
@@ -672,6 +676,39 @@ class ProcessedJob(BaseModel):
         """Convert to dictionary for DataFrame creation."""
         return self.model_dump()
 
+    @classmethod
+    def get_polars_schema(cls) -> dict[str, pl.DataType]:
+        """Get Polars schema derived from Pydantic model fields."""
+        mapping: dict[type[Any], pl.DataType] = {
+            str: pl.Utf8,
+            int: pl.Int64,
+            float: pl.Float64,
+            bool: pl.Boolean,
+            # All datetime fields should be UTC
+            _DATETIME_TYPE: pl.Datetime("us", "UTC"),
+        }
+
+        schema: dict[str, pl.DataType] = {}
+        for field_name, field_info in cls.model_fields.items():
+            annotation = field_info.annotation
+
+            # Handle Optional types (Union[T, None] or T | None)
+            origin = typing.get_origin(annotation)
+            if origin in (typing.Union, types.UnionType):
+                args = typing.get_args(annotation)
+                non_none_args = [arg for arg in args if arg is not type(None)]
+                if non_none_args:
+                    annotation = non_none_args[0]
+
+            mapped_type: pl.DataType | None = None
+            if isinstance(annotation, type):
+                mapped_type = mapping.get(annotation)
+
+            # Map Python types to Polars types (default to Utf8 for unknown types)
+            schema[field_name] = mapped_type or pl.Utf8
+
+        return schema
+
 
 class DateCompletionTracker(BaseModel):
     """Tracks which dates have been fully processed and don't need re-collection."""
@@ -780,9 +817,15 @@ def _parse_datetime(date_str: str | None) -> datetime | None:
         return None
     try:
         # SLURM uses ISO format: 2025-08-19T10:30:00
-        return datetime.fromisoformat(date_str)
+        dt = datetime.fromisoformat(date_str)
     except (ValueError, AttributeError):
         return None
+
+    # Ensure timezone-aware (assume UTC if naive)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+
+    return dt
 
 
 def _parse_gpu_count(alloc_tres: str) -> int:
@@ -1330,10 +1373,14 @@ def _processed_jobs_to_dataframe(
         DataFrame with job data
 
     """
-    return pl.DataFrame(
-        [j.to_dict() for j in processed_jobs],
-        infer_schema_length=None,
-    )
+    # Create DataFrame with explicit schema to prevent Null type inference
+    schema = ProcessedJob.get_polars_schema()
+
+    if not processed_jobs:
+        return pl.DataFrame(schema=schema)
+
+    data_dicts = [j.to_dict() for j in processed_jobs]
+    return pl.DataFrame(data_dicts, schema=schema)
 
 
 def _save_processed_jobs_to_parquet(

@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import re
 import sys
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -402,3 +404,74 @@ class TestGresParsingWithSocket:
             cleaned_gres = re.sub(r"\(S:[0-9-]+\)", "", gres)
             gpu_parts = cleaned_gres.split(":")
             assert int(gpu_parts[-1]) == expected_count
+
+
+class TestDatetimeSchemaConsistency:
+    """Test datetime schema consistency when saving and loading data."""
+
+    def test_parse_datetime_returns_utc(self) -> None:
+        """Test that _parse_datetime returns UTC timezone-aware datetimes."""
+        # Test with ISO format string
+        dt = slurm_usage._parse_datetime("2025-09-20T10:30:00")
+        assert dt is not None
+        assert dt.tzinfo is not None
+        assert dt.tzinfo == timezone.utc
+
+        # Test with None
+        assert slurm_usage._parse_datetime(None) is None
+        assert slurm_usage._parse_datetime("Unknown") is None
+
+    def test_processed_jobs_to_dataframe(self) -> None:
+        """Test that processed jobs are correctly converted to DataFrame."""
+        # Create test ProcessedJob with datetime fields
+        from slurm_usage import ProcessedJob
+
+        job = ProcessedJob(
+            job_id="test123",
+            user="alice",
+            job_name="test_job",
+            partition="gpus",
+            state="COMPLETED",
+            submit_time=datetime(2025, 9, 20, 9, 0, 0, tzinfo=timezone.utc),
+            start_time=datetime(2025, 9, 20, 10, 0, 0, tzinfo=timezone.utc),
+            end_time=datetime(2025, 9, 20, 11, 0, 0, tzinfo=timezone.utc),
+            node_list="node-001",
+            elapsed_seconds=3600,
+            alloc_cpus=4,
+            req_mem_mb=4096,
+            max_rss_mb=2048,
+            total_cpu_seconds=7200,
+            alloc_gpus=1,
+            cpu_efficiency=50.0,
+            memory_efficiency=50.0,
+            cpu_hours_wasted=1.0,
+            memory_gb_hours_wasted=2.0,
+            cpu_hours_reserved=2.0,
+            memory_gb_hours_reserved=4.0,
+            gpu_hours_reserved=1.0,
+            is_complete=True,
+        )
+
+        # Convert to DataFrame
+        df = slurm_usage._processed_jobs_to_dataframe([job])
+
+        # Check DataFrame was created correctly
+        assert len(df) == 1
+        assert df["job_id"][0] == "test123"
+        assert df["user"][0] == "alice"
+
+    def test_load_recent_data_handles_empty_directory(self) -> None:
+        """Test that _load_recent_data handles empty directory gracefully."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = slurm_usage.Config(
+                data_dir=Path(tmpdir),
+                groups={},
+                user_to_group={},
+            )
+
+            processed_dir = Path(tmpdir) / "processed"
+            processed_dir.mkdir(parents=True, exist_ok=True)
+
+            # Should return None for empty directory
+            result = slurm_usage._load_recent_data(config, days=1)
+            assert result is None
