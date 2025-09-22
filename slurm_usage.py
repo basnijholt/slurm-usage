@@ -24,6 +24,7 @@ import json
 import os
 import re
 import subprocess
+import types
 import typing
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -678,7 +679,7 @@ class ProcessedJob(BaseModel):
     @classmethod
     def get_polars_schema(cls) -> dict[str, pl.DataType]:
         """Get Polars schema derived from Pydantic model fields."""
-        mapping: dict[str, pl.DataType] = {
+        mapping: dict[type[Any], pl.DataType] = {
             str: pl.Utf8,
             int: pl.Int64,
             float: pl.Float64,
@@ -687,18 +688,24 @@ class ProcessedJob(BaseModel):
             _DATETIME_TYPE: pl.Datetime("us", "UTC"),
         }
 
-        schema = {}
+        schema: dict[str, pl.DataType] = {}
         for field_name, field_info in cls.model_fields.items():
             annotation = field_info.annotation
 
             # Handle Optional types (Union[T, None] or T | None)
             origin = typing.get_origin(annotation)
-            if origin is typing.Union or origin is type(None | int):
+            if origin in (typing.Union, types.UnionType):
                 args = typing.get_args(annotation)
-                # Get the non-None type
-                annotation = next((arg for arg in args if arg is not type(None)), str)
-            # Map Python types to Polars types
-            schema[field_name] = mapping.get(annotation, pl.Utf8)
+                non_none_args = [arg for arg in args if arg is not type(None)]
+                if non_none_args:
+                    annotation = non_none_args[0]
+
+            mapped_type: pl.DataType | None = None
+            if isinstance(annotation, type):
+                mapped_type = mapping.get(annotation)
+
+            # Map Python types to Polars types (default to Utf8 for unknown types)
+            schema[field_name] = mapped_type or pl.Utf8
 
         return schema
 
@@ -811,12 +818,14 @@ def _parse_datetime(date_str: str | None) -> datetime | None:
     try:
         # SLURM uses ISO format: 2025-08-19T10:30:00
         dt = datetime.fromisoformat(date_str)
-        # Ensure timezone-aware (assume UTC if naive)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
-        return dt
     except (ValueError, AttributeError):
         return None
+
+    # Ensure timezone-aware (assume UTC if naive)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+
+    return dt
 
 
 def _parse_gpu_count(alloc_tres: str) -> int:
