@@ -24,6 +24,7 @@ import json
 import os
 import re
 import subprocess
+import typing
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
@@ -671,6 +672,33 @@ class ProcessedJob(BaseModel):
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for DataFrame creation."""
         return self.model_dump()
+
+    @classmethod
+    def get_polars_schema(cls) -> dict[str, pl.DataType]:
+        """Get Polars schema derived from Pydantic model fields."""
+        mapping: dict[str, pl.DataType] = {
+            str: pl.Utf8,
+            int: pl.Int64,
+            float: pl.Float64,
+            bool: pl.Boolean,
+            # All datetime fields should be UTC
+            datetime: pl.Datetime("us", "UTC"),
+        }
+
+        schema = {}
+        for field_name, field_info in cls.model_fields.items():
+            annotation = field_info.annotation
+
+            # Handle Optional types (Union[T, None] or T | None)
+            origin = typing.get_origin(annotation)
+            if origin is typing.Union or origin is type(None | int):
+                args = typing.get_args(annotation)
+                # Get the non-None type
+                annotation = next((arg for arg in args if arg is not type(None)), str)
+            # Map Python types to Polars types
+            schema[field_name] = mapping.get(annotation, pl.Utf8)
+
+        return schema
 
 
 class DateCompletionTracker(BaseModel):
@@ -1334,10 +1362,14 @@ def _processed_jobs_to_dataframe(
         DataFrame with job data
 
     """
-    return pl.DataFrame(
-        [j.to_dict() for j in processed_jobs],
-        infer_schema_length=None,
-    )
+    # Create DataFrame with explicit schema to prevent Null type inference
+    schema = ProcessedJob.get_polars_schema()
+
+    if not processed_jobs:
+        return pl.DataFrame(schema=schema)
+
+    data_dicts = [j.to_dict() for j in processed_jobs]
+    return pl.DataFrame(data_dicts, schema=schema)
 
 
 def _save_processed_jobs_to_parquet(
