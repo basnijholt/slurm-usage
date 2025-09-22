@@ -780,7 +780,11 @@ def _parse_datetime(date_str: str | None) -> datetime | None:
         return None
     try:
         # SLURM uses ISO format: 2025-08-19T10:30:00
-        return datetime.fromisoformat(date_str)
+        dt = datetime.fromisoformat(date_str)
+        # Ensure timezone-aware (assume UTC if naive)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt
     except (ValueError, AttributeError):
         return None
 
@@ -1145,16 +1149,9 @@ def _load_recent_data(
     for f in parquet_files:
         try:
             df = pl.read_parquet(f)
-            # Ensure consistent datetime schema - convert to UTC if needed
-            for col in df.columns:
-                col_type = df[col].dtype
-                # Check if it's a datetime type
-                if isinstance(col_type, pl.Datetime):
-                    # Convert to timezone-aware UTC datetime
-                    if col_type.time_zone is None:
-                        df = df.with_columns(pl.col(col).dt.replace_time_zone("UTC"))
-                    elif col_type.time_zone != "UTC":
-                        df = df.with_columns(pl.col(col).dt.convert_time_zone("UTC"))
+            # For backward compatibility with existing files that may have inconsistent schemas
+            # New files will be saved with consistent UTC datetime schemas
+            df = _ensure_utc_datetimes(df)
             dfs.append(df)
         except (OSError, pl.exceptions.ComputeError) as e:  # noqa: PERF203
             console.print(f"[yellow]Warning: Could not read {f}: {e}[/yellow]")
@@ -1163,7 +1160,7 @@ def _load_recent_data(
     if not dfs:
         return None
 
-    # Use diagonal concat to handle schema differences more gracefully
+    # Use diagonal_relaxed for compatibility with older files that may have schema differences
     combined = pl.concat(dfs, how="diagonal_relaxed")
 
     # Deduplicate by job_id if processing processed data
@@ -1329,6 +1326,25 @@ def _extract_job_date(start_time: str | None, submit_time: str | None) -> str | 
     return None
 
 
+def _ensure_utc_datetimes(df: pl.DataFrame) -> pl.DataFrame:
+    """Ensure all datetime columns in a DataFrame are UTC timezone-aware.
+
+    Args:
+        df: DataFrame to process
+
+    Returns:
+        DataFrame with all datetime columns as UTC timezone-aware
+    """
+    for col in df.columns:
+        if isinstance(df[col].dtype, pl.Datetime):
+            # Convert to UTC timezone-aware if not already
+            if df[col].dtype.time_zone is None:
+                df = df.with_columns(pl.col(col).dt.replace_time_zone("UTC"))
+            elif df[col].dtype.time_zone != "UTC":
+                df = df.with_columns(pl.col(col).dt.convert_time_zone("UTC"))
+    return df
+
+
 def _processed_jobs_to_dataframe(
     processed_jobs: list[ProcessedJob],
 ) -> pl.DataFrame:
@@ -1341,10 +1357,13 @@ def _processed_jobs_to_dataframe(
         DataFrame with job data
 
     """
-    return pl.DataFrame(
+    df = pl.DataFrame(
         [j.to_dict() for j in processed_jobs],
         infer_schema_length=None,
     )
+
+    # Ensure all datetime columns are UTC timezone-aware for consistency
+    return _ensure_utc_datetimes(df)
 
 
 def _save_processed_jobs_to_parquet(
@@ -2412,6 +2431,7 @@ def collect(  # noqa: PLR0912, PLR0915
                         # Save raw data (keeping for archival - SLURM might purge old data)
                         raw_file = config.raw_data_dir / f"{date_str}.parquet"
                         raw_df = pl.DataFrame([r.model_dump() for r in result.raw_records])
+                        raw_df = _ensure_utc_datetimes(raw_df)
                         raw_df.write_parquet(raw_file)
                         total_raw += len(result.raw_records)
 
@@ -2428,6 +2448,9 @@ def collect(  # noqa: PLR0912, PLR0915
 
                             # Merge: keep the most recent version of each job
                             # This updates job states for existing jobs and adds new ones
+                            # Ensure both DataFrames have consistent datetime schemas before merging
+                            existing_df = _ensure_utc_datetimes(existing_df)
+                            new_df = _ensure_utc_datetimes(new_df)
                             merged_df = pl.concat([existing_df, new_df])
                             merged_df = merged_df.sort("processed_date", descending=True).unique(subset=["job_id"], keep="first")
                             merged_df.write_parquet(processed_file)

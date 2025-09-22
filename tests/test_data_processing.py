@@ -408,64 +408,85 @@ class TestGresParsingWithSocket:
 
 
 class TestDatetimeSchemaConsistency:
-    """Test datetime schema consistency when loading and concatenating data."""
+    """Test datetime schema consistency when saving and loading data."""
 
-    def test_load_recent_data_with_mixed_datetime_schemas(self) -> None:
-        """Test that _load_recent_data handles mixed datetime schemas correctly."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create config with temp directory
-            config = slurm_usage.Config(
-                data_dir=Path(tmpdir),
-                groups={},
-                user_to_group={},
-            )
+    def test_ensure_utc_datetimes(self) -> None:
+        """Test that _ensure_utc_datetimes converts all datetime columns to UTC."""
+        # Create DataFrame with mixed datetime schemas
+        df = pl.DataFrame({
+            "job_id": ["job1", "job2"],
+            "naive_datetime": [
+                datetime(2025, 9, 20, 10, 0, 0),
+                datetime(2025, 9, 20, 11, 0, 0),
+            ],
+            "utc_datetime": [
+                datetime(2025, 9, 20, 10, 0, 0, tzinfo=timezone.utc),
+                datetime(2025, 9, 20, 11, 0, 0, tzinfo=timezone.utc),
+            ],
+            "value": [1.0, 2.0],
+        })
 
-            # Create processed subdirectory
-            processed_dir = Path(tmpdir) / "processed"
-            processed_dir.mkdir(parents=True, exist_ok=True)
+        # Apply the function
+        result = slurm_usage._ensure_utc_datetimes(df)
 
-            # Create test data with different datetime schemas
-            # DataFrame 1: UTC timezone-aware datetime
-            df1 = pl.DataFrame({
-                "job_id": ["job1", "job2"],
-                "user": ["alice", "bob"],
-                "cpu_hours_used": [1.0, 2.0],
-                "processed_date": [
-                    datetime(2025, 9, 20, 10, 0, 0, tzinfo=timezone.utc),
-                    datetime(2025, 9, 20, 11, 0, 0, tzinfo=timezone.utc),
-                ],
-                "is_complete": [True, True],
-            })
+        # Check all datetime columns are UTC
+        for col in ["naive_datetime", "utc_datetime"]:
+            col_type = result[col].dtype
+            assert isinstance(col_type, pl.Datetime)
+            assert col_type.time_zone == "UTC", f"Column {col} should be UTC"
 
-            # DataFrame 2: Naive datetime (no timezone)
-            df2 = pl.DataFrame({
-                "job_id": ["job3", "job4"],
-                "user": ["charlie", "dave"],
-                "cpu_hours_used": [3.0, 4.0],
-                "processed_date": [
-                    datetime(2025, 9, 21, 10, 0, 0),
-                    datetime(2025, 9, 21, 11, 0, 0),
-                ],
-                "is_complete": [True, True],
-            })
+    def test_parse_datetime_returns_utc(self) -> None:
+        """Test that _parse_datetime returns UTC timezone-aware datetimes."""
+        # Test with ISO format string
+        dt = slurm_usage._parse_datetime("2025-09-20T10:30:00")
+        assert dt is not None
+        assert dt.tzinfo is not None
+        assert dt.tzinfo == timezone.utc
 
-            # Save DataFrames as parquet files
-            df1.write_parquet(processed_dir / "2025-09-20.parquet")
-            df2.write_parquet(processed_dir / "2025-09-21.parquet")
+        # Test with None
+        assert slurm_usage._parse_datetime(None) is None
+        assert slurm_usage._parse_datetime("Unknown") is None
 
-            # Load data using the function
-            result = slurm_usage._load_recent_data(config, days=2)
+    def test_processed_jobs_to_dataframe_utc(self) -> None:
+        """Test that processed jobs are saved with UTC datetimes."""
+        # Create test ProcessedJob with datetime fields
+        from slurm_usage import ProcessedJob
 
-            # Verify the data was loaded and concatenated successfully
-            assert result is not None
-            assert len(result) == 4
-            assert "job_id" in result.columns
-            assert "processed_date" in result.columns
+        job = ProcessedJob(
+            job_id="test123",
+            user="alice",
+            job_name="test_job",
+            partition="gpus",
+            state="COMPLETED",
+            submit_time=datetime(2025, 9, 20, 9, 0, 0),  # Naive
+            start_time=datetime(2025, 9, 20, 10, 0, 0, tzinfo=timezone.utc),  # UTC
+            end_time=datetime(2025, 9, 20, 11, 0, 0),  # Naive
+            node_list="node-001",
+            elapsed_seconds=3600,
+            alloc_cpus=4,
+            req_mem_mb=4096,
+            max_rss_mb=2048,
+            total_cpu_seconds=7200,
+            alloc_gpus=1,
+            cpu_efficiency=50.0,
+            memory_efficiency=50.0,
+            cpu_hours_wasted=1.0,
+            memory_gb_hours_wasted=2.0,
+            cpu_hours_reserved=2.0,
+            memory_gb_hours_reserved=4.0,
+            gpu_hours_reserved=1.0,
+            is_complete=True
+        )
 
-            # Check that all datetime columns are now UTC timezone-aware
-            date_col_type = result["processed_date"].dtype
-            assert isinstance(date_col_type, pl.Datetime)
-            assert date_col_type.time_zone == "UTC"
+        # Convert to DataFrame
+        df = slurm_usage._processed_jobs_to_dataframe([job])
+
+        # Check that all datetime columns are UTC
+        for col in ["submit_time", "start_time", "end_time", "processed_date"]:
+            if col in df.columns:
+                col_type = df[col].dtype
+                if isinstance(col_type, pl.Datetime):
+                    assert col_type.time_zone == "UTC", f"Column {col} should be UTC"
 
     def test_load_recent_data_handles_empty_directory(self) -> None:
         """Test that _load_recent_data handles empty directory gracefully."""
