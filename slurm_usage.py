@@ -1031,15 +1031,14 @@ def process_data(
     for s in output:
         if metric == "memory":
             value = s.memory_mb / 1024 if s.memory_mb > 0 else 0.0  # Convert to GB
-        else:
-            if s.oversubscribe in ["NO", "USER"]:
-                if s.node not in counted_nodes[s.user]:
-                    value = float(get_total_cores(s.node))
-                    counted_nodes[s.user].add(s.node)
-                else:
-                    continue  # Skip to prevent double-counting exclusive nodes
+        elif s.oversubscribe in ["NO", "USER"]:
+            if s.node not in counted_nodes[s.user]:
+                value = float(get_total_cores(s.node))
+                counted_nodes[s.user].add(s.node)
             else:
-                value = float(s.nnodes) if metric == "nodes" else float(s.cores)
+                continue  # Skip to prevent double-counting exclusive nodes
+        else:
+            value = float(s.nnodes) if metric == "nodes" else float(s.cores)
 
         data[s.user][s.partition][s.status] += value
         total_partition[s.partition][s.status] += value
@@ -2736,10 +2735,7 @@ def current(
 
         for user, _stats in sorted(data.items()):
             kw = {"style": "bold italic"} if user == me else {}
-            partition_stats = [
-                summarize_status(_stats[p], formatter) if p in _stats else "-"
-                for p in partitions
-            ]
+            partition_stats = [summarize_status(_stats[p], formatter) if p in _stats else "-" for p in partitions]
             total_summary = summarize_status(combine_statuses(_stats), formatter)
             table.add_row(user, *partition_stats, total_summary, **kw)
         console.print(table, justify="center")
