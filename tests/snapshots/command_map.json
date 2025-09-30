@@ -1,5 +1,5 @@
 {
-  "squeue -ro %u/%t/%D/%P/%C/%N/%h": "squeue",
+  "squeue -ro %u/%t/%D/%P/%C/%N/%h/%m": "squeue",
   "sinfo -h -N --format='%N,%c'": "sinfo_cpus",
   "sinfo -h -N --format='%N,%G'": "sinfo_gpus",
   "sacct -a -S 2025-08-21T00:00:00 -E 2025-08-21T23:59:59 --format=JobID,JobIDRaw,JobName,User,UID,Group,GID,Account,Partition,QOS,State,ExitCode,Submit,Eligible,Start,End,Elapsed,ElapsedRaw,CPUTime,CPUTimeRAW,TotalCPU,UserCPU,SystemCPU,AllocCPUS,AllocNodes,NodeList,ReqCPUS,ReqMem,ReqNodes,Timelimit,TimelimitRaw,MaxRSS,MaxVMSize,MaxDiskRead,MaxDiskWrite,AveRSS,AveCPU,AveVMSize,ConsumedEnergy,ConsumedEnergyRaw,Priority,Reservation,ReservationId,WorkDir,Cluster,ReqTRES,AllocTRES,Comment,Constraints,Container,DerivedExitCode,Flags,Layout,MaxRSSNode,MaxVMSizeNode,MinCPU,NCPUS,NNodes,NTasks,Reason,SubmitLine -P -n": "sacct_day_0",

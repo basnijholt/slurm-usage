@@ -28,10 +28,10 @@ from slurm_usage import (  # noqa: E402
 )
 
 # Mock squeue output
-squeue_mock_output = """USER/ST/NODES/PARTITION
-bas.nijholt/PD/1/mypartition-10
-bas.nijholt/PD/1/mypartition-20
-bas.nijholt/PD/1/mypartition-20"""
+squeue_mock_output = """USER/ST/NODES/PARTITION/CPUS/NODELIST/OVER_SUBSCRIBE/MEMORY
+bas.nijholt/PD/1/mypartition-10/8/node-001/OK/8000M
+bas.nijholt/PD/1/mypartition-20/16/node-002/OK/16000M
+bas.nijholt/PD/1/mypartition-20/16/node-003/OK/16000M"""
 
 
 @pytest.fixture
@@ -63,11 +63,13 @@ def test_process_data() -> None:
 
     # Create proper SlurmJob objects instead of strings
     output = [
-        SlurmJob("user1", "R", 2, "partition1", 10, "node1", "YES"),
-        SlurmJob("user2", "PD", 1, "partition2", 5, "node2", "YES"),
-        SlurmJob("user1", "PD", 1, "partition1", 5, "node3", "YES"),
+        SlurmJob("user1", "R", 2, "partition1", 10, "node1", "YES", 2048.0),
+        SlurmJob("user2", "PD", 1, "partition2", 5, "node2", "YES", 1024.0),
+        SlurmJob("user1", "PD", 1, "partition1", 5, "node3", "YES", 1024.0),
     ]
-    data, total_partition, totals = process_data(output, "nodes")
+    aggregated_nodes = process_data(output, "nodes")
+    data = aggregated_nodes.per_user
+    totals = aggregated_nodes.totals
     expected_r_count = 2
     expected_pd_single = 1
     expected_pd_total = 2
@@ -75,6 +77,11 @@ def test_process_data() -> None:
     assert data["user2"]["partition2"]["PD"] == expected_pd_single
     assert totals["PD"] == expected_pd_total
     assert totals["R"] == expected_r_count
+
+    aggregated_memory = process_data(output, "memory")
+    totals_memory = aggregated_memory.totals
+    assert totals_memory["R"] == pytest.approx(2.0)
+    assert totals_memory["PD"] == pytest.approx(2.0)
 
 
 def test_summarize_status() -> None:

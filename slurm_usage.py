@@ -31,7 +31,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from getpass import getuser
 from pathlib import Path
-from typing import Annotated, Any, NamedTuple
+from typing import Annotated, Any, Callable, Literal, Mapping, NamedTuple, cast
 
 import polars as pl
 import typer
@@ -290,7 +290,7 @@ def run_squeue() -> CommandResult:
         CommandResult with stdout, stderr, and return code
 
     """
-    cmd = ["squeue", "-ro", "%u/%t/%D/%P/%C/%N/%h"]
+    cmd = ["squeue", "-ro", "%u/%t/%D/%P/%C/%N/%h/%m"]
     return _run(cmd)
 
 
@@ -930,11 +930,12 @@ class SlurmJob(NamedTuple):
     cores: int
     node: str
     oversubscribe: str
+    memory_mb: float
 
     @classmethod
     def from_line(cls, line: str) -> SlurmJob:
         """Create a SlurmJob from a squeue output line."""
-        user, status, nnodes, partition, cores, node, oversubscribe = line.split("/")
+        user, status, nnodes, partition, cores, node, oversubscribe, memory = line.split("/")
         return cls(
             user,
             status,
@@ -943,6 +944,7 @@ class SlurmJob(NamedTuple):
             int(cores),
             node,
             oversubscribe,
+            _parse_memory_mb(memory),
         )
 
 
@@ -968,53 +970,78 @@ def get_total_cores(node_name: str) -> int:
     return 0  # Return 0 if not found
 
 
+ResourceMetric = Literal["cores", "nodes", "memory"]
+STATUS_ROUNDING_EPSILON = 1e-9
+RESOURCE_OPTION = cast(
+    list[str] | None,
+    typer.Option(
+        None,
+        "--resource",
+        "-r",
+        help="Resources to summarize (repeatable). Choose from cores, nodes, memory.",
+    ),
+)
+
+
+class ResourceAggregation(NamedTuple):
+    """Aggregated resource counts for users, partitions, and overall totals."""
+
+    per_user: defaultdict[str, defaultdict[str, defaultdict[str, float]]]
+    per_partition: defaultdict[str, defaultdict[str, float]]
+    totals: defaultdict[str, float]
+
+
 def process_data(
     output: list[SlurmJob],
-    cores_or_nodes: str,
-) -> tuple[
-    defaultdict[str, defaultdict[str, defaultdict[str, int]]],
-    defaultdict[str, defaultdict[str, int]],
-    defaultdict[str, int],
-]:
-    """Process SLURM job data and aggregate statistics."""
-    data: defaultdict[str, defaultdict[str, defaultdict[str, int]]] = defaultdict(
-        lambda: defaultdict(lambda: defaultdict(int)),
+    metric: ResourceMetric,
+) -> ResourceAggregation:
+    """Process SLURM job data and aggregate statistics by resource metric."""
+    data: defaultdict[str, defaultdict[str, defaultdict[str, float]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(float)),
     )
-    total_partition: defaultdict[str, defaultdict[str, int]] = defaultdict(
-        lambda: defaultdict(int),
+    total_partition: defaultdict[str, defaultdict[str, float]] = defaultdict(
+        lambda: defaultdict(float),
     )
-    totals: defaultdict[str, int] = defaultdict(int)
+    totals: defaultdict[str, float] = defaultdict(float)
 
-    # Track which nodes have been counted for each user
+    # Track which nodes have been counted for each user when resources are exclusive
     counted_nodes: defaultdict[str, set[str]] = defaultdict(set)
 
     for s in output:
-        if s.oversubscribe in ["NO", "USER"]:
+        if metric == "memory":
+            value = s.memory_mb / 1024 if s.memory_mb > 0 else 0.0  # Convert to GB
+        elif s.oversubscribe in ["NO", "USER"]:
             if s.node not in counted_nodes[s.user]:
-                n = get_total_cores(s.node)  # Get total cores in the node
-                # Mark this node as counted for this user
+                value = float(get_total_cores(s.node))
                 counted_nodes[s.user].add(s.node)
             else:
-                continue  # Skip this job to prevent double-counting
+                continue  # Skip to prevent double-counting exclusive nodes
         else:
-            n = s.nnodes if cores_or_nodes == "nodes" else s.cores
+            value = float(s.nnodes) if metric == "nodes" else float(s.cores)
 
-        # Update the data structures with the correct values
-        data[s.user][s.partition][s.status] += n
-        total_partition[s.partition][s.status] += n
-        totals[s.status] += n
+        data[s.user][s.partition][s.status] += value
+        total_partition[s.partition][s.status] += value
+        totals[s.status] += value
 
-    return data, total_partition, totals
+    return ResourceAggregation(data, total_partition, totals)
 
 
-def summarize_status(d: dict[str, int]) -> str:
+def summarize_status(d: Mapping[str, float], formatter: Callable[[float], str] | None = None) -> str:
     """Summarize status dictionary into a readable string."""
-    return " / ".join([f"{status}={n}" for status, n in d.items()])
+
+    def _format(value: float) -> str:
+        if formatter is not None:
+            return formatter(value)
+        if abs(value - round(value)) < STATUS_ROUNDING_EPSILON:
+            return str(int(round(value)))
+        return f"{value:.2f}".rstrip("0").rstrip(".")
+
+    return " / ".join([f"{status}={_format(n)}" for status, n in d.items()])
 
 
-def combine_statuses(d: dict[str, Any]) -> dict[str, int]:
+def combine_statuses(d: dict[str, Any]) -> dict[str, float]:
     """Combine multiple status dictionaries into one."""
-    tot: defaultdict[str, int] = defaultdict(int)
+    tot: defaultdict[str, float] = defaultdict(float)
     for dct in d.values():
         for status, n in dct.items():
             tot[status] += n
@@ -2626,25 +2653,64 @@ def status(
         console.print(f"\n[bold]Disk Usage:[/bold] {total_size / (1024**2):.1f} MB")
 
 
+def _resource_formatter(metric: ResourceMetric) -> Callable[[float], str]:
+    if metric == "memory":
+        return lambda value: f"{value:.1f} GB"
+    return lambda value: str(int(round(value)))
+
+
 @app.command()
-def current() -> None:
+def current(
+    resources: list[str] | None = RESOURCE_OPTION,
+) -> None:
     """Display current cluster usage statistics from squeue."""
     output = squeue_output()
     me = getuser()
-    for which in ["cores", "nodes"]:
-        data, total_partition, totals = process_data(output, which)
+
+    if isinstance(resources, list):
+        resources_list: list[str] | None = resources if resources else None
+    else:
+        resources_list = None
+
+    allowed_metrics: tuple[ResourceMetric, ...] = ("cores", "nodes", "memory")
+    seen: set[str] = set()
+    ordered_resources: list[ResourceMetric] = []
+
+    if resources_list is None:
+        ordered_resources = ["cores", "nodes"]
+    else:
+        for entry in resources_list:
+            normalized = entry.lower()
+            if normalized not in allowed_metrics:
+                error_message = "Invalid resource '{entry}'. Choose from cores, nodes, memory."
+                raise typer.BadParameter(error_message.format(entry=entry))
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            ordered_resources.append(cast(ResourceMetric, normalized))
+
+        if not ordered_resources:
+            ordered_resources = ["cores", "nodes"]
+
+    for which in ordered_resources:
+        aggregated = process_data(output, which)
+        data = aggregated.per_user
+        total_partition = aggregated.per_partition
+        totals = aggregated.totals
+        formatter = _resource_formatter(which)
         table = Table(title=f"SLURM statistics [b]{which}[/]", show_footer=True)
         partitions = sorted(total_partition.keys())
         table.add_column("User", f"{len(data)} users", style="cyan")
         for partition in partitions:
-            tot = summarize_status(total_partition[partition])
+            tot = summarize_status(total_partition[partition], formatter)
             table.add_column(partition, tot, style="magenta")
-        table.add_column("Total", summarize_status(totals), style="magenta")
+        table.add_column("Total", summarize_status(totals, formatter), style="magenta")
 
         for user, _stats in sorted(data.items()):
             kw = {"style": "bold italic"} if user == me else {}
-            partition_stats = [summarize_status(_stats[p]) if p in _stats else "-" for p in partitions]
-            table.add_row(user, *partition_stats, summarize_status(combine_statuses(_stats)), **kw)
+            partition_stats = [summarize_status(_stats[p], formatter) if p in _stats else "-" for p in partitions]
+            total_summary = summarize_status(combine_statuses(_stats), formatter)
+            table.add_row(user, *partition_stats, total_summary, **kw)
         console.print(table, justify="center")
 
 
