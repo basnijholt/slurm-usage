@@ -394,37 +394,6 @@ def _get_mock_file_prefix(cmd_str: str, command_map: dict[str, str]) -> tuple[st
     return None, False
 
 
-def _upgrade_squeue_mock_output(stdout: str) -> str:
-    """Ensure mock squeue output includes memory column for compatibility."""
-    lines = stdout.splitlines()
-    if not lines:
-        return stdout
-
-    header = lines[0]
-    if header.endswith("/MEMORY"):
-        return stdout
-
-    upgraded_lines = [f"{header}/MEMORY"]
-    for line in lines[1:]:
-        if not line.strip():
-            upgraded_lines.append(line)
-            continue
-
-        parts = line.split("/")
-        memory_value = "0"
-        if len(parts) >= 5:
-            cores_str = parts[4]
-            try:
-                cores = int(cores_str)
-                memory_value = f"{max(cores * 500, 1000)}M"
-            except ValueError:
-                memory_value = "0"
-        upgraded_lines.append(f"{line}/{memory_value}")
-
-    trailing_newline = "\n" if stdout.endswith("\n") else ""
-    return "\n".join(upgraded_lines) + trailing_newline
-
-
 def _maybe_run_mock(cmd: str | list[str]) -> CommandResult | None:
     if USE_MOCK_DATA:
         cmd_str = cmd if isinstance(cmd, str) else " ".join(cmd)
@@ -444,8 +413,6 @@ def _maybe_run_mock(cmd: str | list[str]) -> CommandResult | None:
 
         stdout_file = snapshot_dir / f"{file_prefix}_output.txt"
         stdout = stdout_file.read_text()
-        if cmd_str.startswith("squeue") and "/%m" in cmd_str:
-            stdout = _upgrade_squeue_mock_output(stdout)
         rc_file = snapshot_dir / f"{file_prefix}_returncode.txt"
         err_file = snapshot_dir / f"{file_prefix}_stderr.txt"
         returncode = int(rc_file.read_text().strip())
