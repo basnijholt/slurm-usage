@@ -69,7 +69,6 @@ def test_process_data() -> None:
     ]
     aggregated_nodes = process_data(output, "nodes")
     data = aggregated_nodes.per_user
-    total_partition = aggregated_nodes.per_partition
     totals = aggregated_nodes.totals
     expected_r_count = 2
     expected_pd_single = 1

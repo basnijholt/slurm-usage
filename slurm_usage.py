@@ -31,7 +31,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from getpass import getuser
 from pathlib import Path
-from typing import Annotated, Any, Callable, Literal, NamedTuple
+from typing import Annotated, Any, Callable, Literal, Mapping, NamedTuple, cast
 
 import polars as pl
 import typer
@@ -971,9 +971,21 @@ def get_total_cores(node_name: str) -> int:
 
 
 ResourceMetric = Literal["cores", "nodes", "memory"]
+STATUS_ROUNDING_EPSILON = 1e-9
+RESOURCE_OPTION = cast(
+    list[str] | None,
+    typer.Option(
+        None,
+        "--resource",
+        "-r",
+        help="Resources to summarize (repeatable). Choose from cores, nodes, memory.",
+    ),
+)
 
 
 class ResourceAggregation(NamedTuple):
+    """Aggregated resource counts for users, partitions, and overall totals."""
+
     per_user: defaultdict[str, defaultdict[str, defaultdict[str, float]]]
     per_partition: defaultdict[str, defaultdict[str, float]]
     totals: defaultdict[str, float]
@@ -1014,13 +1026,13 @@ def process_data(
     return ResourceAggregation(data, total_partition, totals)
 
 
-def summarize_status(d: dict[str, float], formatter: Callable[[float], str] | None = None) -> str:
+def summarize_status(d: Mapping[str, float], formatter: Callable[[float], str] | None = None) -> str:
     """Summarize status dictionary into a readable string."""
 
     def _format(value: float) -> str:
         if formatter is not None:
             return formatter(value)
-        if abs(value - round(value)) < 1e-9:
+        if abs(value - round(value)) < STATUS_ROUNDING_EPSILON:
             return str(int(round(value)))
         return f"{value:.2f}".rstrip("0").rstrip(".")
 
@@ -2649,12 +2661,7 @@ def _resource_formatter(metric: ResourceMetric) -> Callable[[float], str]:
 
 @app.command()
 def current(
-    resources: list[str] = typer.Option(  # type: ignore[assignment]
-        None,
-        "--resource",
-        "-r",
-        help="Resources to summarize (repeatable). Choose from cores, nodes, memory.",
-    ),
+    resources: list[str] | None = RESOURCE_OPTION,
 ) -> None:
     """Display current cluster usage statistics from squeue."""
     output = squeue_output()
@@ -2675,13 +2682,12 @@ def current(
         for entry in resources_list:
             normalized = entry.lower()
             if normalized not in allowed_metrics:
-                raise typer.BadParameter(
-                    f"Invalid resource '{entry}'. Choose from cores, nodes, memory.",
-                )
+                error_message = "Invalid resource '{entry}'. Choose from cores, nodes, memory."
+                raise typer.BadParameter(error_message.format(entry=entry))
             if normalized in seen:
                 continue
             seen.add(normalized)
-            ordered_resources.append(typing.cast(ResourceMetric, normalized))
+            ordered_resources.append(cast(ResourceMetric, normalized))
 
         if not ordered_resources:
             ordered_resources = ["cores", "nodes"]
