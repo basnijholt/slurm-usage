@@ -250,7 +250,7 @@ class TestDataCollection:
 
         test_data = []
         for i in range(3):
-            record_dict = {field: "" for field in fields}
+            record_dict = dict.fromkeys(fields, "")
             record_dict["JobIDRaw"] = f"job_{i}"
             record_dict["User"] = f"user{i}"
             test_data.append(record_dict)
