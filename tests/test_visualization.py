@@ -361,6 +361,28 @@ class TestSessionLeaderWaitMetrics:
         assert stats.mean_wait_hours is None
         assert stats.over_two_hours == 0
 
+    def test_compute_user_wait_hotlist_empty(self) -> None:
+        """All-job wait hotlist handles empty frames."""
+        empty = pl.DataFrame(schema={"user": pl.Utf8, "wait_seconds": pl.Float64})
+        result = slurm_usage._compute_user_wait_hotlist(empty)
+        assert result.is_empty()
+
+    def test_compute_user_wait_hotlist_values(self) -> None:
+        """All-job wait hotlist returns per-user metrics."""
+        df = pl.DataFrame(
+            {
+                "user": ["alice", "alice", "bob", "bob"],
+                "wait_seconds": [7200.0, 90_000.0, 60.0, 100_000.0],
+            },
+        )
+
+        stats_df = slurm_usage._compute_user_wait_hotlist(df)
+        stats = {row["user"]: row for row in stats_df.iter_rows(named=True)}
+
+        assert stats["alice"]["jobs_with_wait"] == 2
+        assert stats["alice"]["over_twenty_four_hours"] == 1
+        assert stats["bob"]["over_two_hours"] == 1
+
     def test_compute_user_session_leader_stats_empty(self) -> None:
         """Empty inputs should return empty schema-consistent DataFrame."""
         empty_df = pl.DataFrame(schema={"user": pl.Utf8, "wait_seconds": pl.Float64})
@@ -389,7 +411,7 @@ class TestSessionLeaderWaitMetrics:
         """Session leader section should warn when submit data missing."""
         df = pl.DataFrame({"user": ["alice"], "submit_time": [None], "wait_seconds": [None]})
 
-        slurm_usage._create_session_leader_wait_section(df)
+        slurm_usage._create_session_leader_wait_section(df, idle_hours=6)
 
         assert any("Not enough" in str(call.args[0]) for call in mock_print.call_args_list)
 
@@ -410,7 +432,7 @@ class TestSessionLeaderWaitMetrics:
             },
         )
 
-        slurm_usage._create_session_leader_wait_section(df)
+        slurm_usage._create_session_leader_wait_section(df, idle_hours=6)
 
         assert mock_print.call_count >= 2
         mock_chart.assert_not_called()
@@ -440,7 +462,7 @@ class TestSessionLeaderWaitMetrics:
             },
         )
 
-        slurm_usage._create_session_leader_wait_section(df)
+        slurm_usage._create_session_leader_wait_section(df, idle_hours=6)
 
         mock_chart.assert_called_once()
         labels, counts = mock_chart.call_args.args[:2]
@@ -553,6 +575,28 @@ class TestSummaryStatistics:
 
         # Should handle groups properly
         assert mock_print.called
+
+    def test_prepare_dataframe_adds_cancelled_wait(self, tmp_path: Path, test_dates: dict[str, str]) -> None:
+        """Cancelled-before-start jobs should get wait_seconds based on cancellation time."""
+        config = slurm_usage.Config.create(data_dir=tmp_path)
+        submit_time = datetime.fromisoformat(f"{test_dates['today']}T08:00:00").replace(tzinfo=UTC)
+        end_time = submit_time + timedelta(hours=5)
+
+        df = pl.DataFrame(
+            {
+                "user": ["user1"],
+                "state": ["CANCELLED"],
+                "submit_time": [submit_time],
+                "start_time": pl.Series("start_time", [None], dtype=pl.Datetime("us", "UTC")),
+                "end_time": [end_time],
+                "elapsed_seconds": [0],
+                "alloc_cpus": [1],
+                "req_mem_mb": [1024.0],
+            },
+        )
+
+        prepared = slurm_usage._prepare_dataframe_for_analysis(df, config)
+        assert prepared["wait_seconds"][0] == 5 * 3600
 
 
 class TestProcessedSchemaHelpers:

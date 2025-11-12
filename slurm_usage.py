@@ -177,9 +177,15 @@ class Config(BaseModel):
     data_dir: Path
     groups: dict[str, list[str]] = Field(default_factory=dict)
     user_to_group: dict[str, str] = Field(default_factory=dict, exclude=True)
+    session_leader_idle_hours: int = 1
 
     @classmethod
-    def create(cls, data_dir: Path | None = None, groups: dict[str, list[str]] | None = None) -> Config:
+    def create(
+        cls,
+        data_dir: Path | None = None,
+        groups: dict[str, list[str]] | None = None,
+        session_leader_idle_hours: int | None = None,
+    ) -> Config:
         """Create a Config instance with proper data directory resolution.
 
         Args:
@@ -211,10 +217,18 @@ class Config(BaseModel):
             # Check config file, otherwise use default ./data
             data_dir = Path(file_config["data_dir"]) if "data_dir" in file_config and file_config["data_dir"] is not None else Path("data")
 
+        if session_leader_idle_hours is None:
+            session_leader_idle_hours = file_config.get("session_leader_idle_hours")
+        if session_leader_idle_hours is None:
+            session_leader_idle_hours = 1
+        else:
+            session_leader_idle_hours = int(session_leader_idle_hours)
+
         return cls(
             data_dir=data_dir,
             groups=groups,
             user_to_group=user_to_group,
+            session_leader_idle_hours=session_leader_idle_hours,
         )
 
     def get_user_group(self, user: str) -> str:
@@ -1957,12 +1971,22 @@ def _prepare_dataframe_for_analysis(df: pl.DataFrame, config: Config) -> pl.Data
         )
 
     # Calculate wait time (in seconds) for jobs that have both submit and start times
-    return df.with_columns(
+    wait_seconds_expr = (
         pl.when((pl.col("submit_time").is_not_null()) & (pl.col("start_time").is_not_null()))
         .then((pl.col("start_time") - pl.col("submit_time")).dt.total_seconds())
+        .when(
+            # Treat cancelled-before-start jobs as waiting until cancellation time
+            (pl.col("start_time").is_null())
+            & (pl.col("submit_time").is_not_null())
+            & (pl.col("end_time").is_not_null())
+            & (pl.col("state") == "CANCELLED"),
+        )
+        .then((pl.col("end_time") - pl.col("submit_time")).dt.total_seconds())
         .otherwise(None)
-        .alias("wait_seconds"),
+        .alias("wait_seconds")
     )
+
+    return df.with_columns(wait_seconds_expr)
 
 
 def _format_wait_hours(value: float | None) -> str:
@@ -1973,6 +1997,18 @@ def _format_wait_hours(value: float | None) -> str:
     total_minutes = int(round(value * 60))
     hours, minutes = divmod(total_minutes, 60)
     return f"{hours:02d}:{minutes:02d}"
+
+
+def _seconds_to_hours(value: float | None) -> float | None:
+    """Convert seconds to hours as float."""
+    if value is None:
+        return None
+    return float(value) / 3600
+
+
+def _format_wait_from_seconds(value: float | None) -> str:
+    """Format seconds-based wait into HH:MM."""
+    return _format_wait_hours(_seconds_to_hours(value))
 
 
 def _identify_session_leader_jobs(df: pl.DataFrame, idle_hours: int = 6) -> pl.DataFrame:
@@ -2079,11 +2115,6 @@ def _calculate_session_leader_wait_stats(
         ],
     ).to_dicts()[0]
 
-    def _seconds_to_hours(value: float | None) -> float | None:
-        if value is None:
-            return None
-        return float(value) / 3600
-
     return SessionLeaderWaitStats(
         leader_jobs=leader_jobs,
         total_jobs=total_jobs,
@@ -2099,7 +2130,7 @@ def _calculate_session_leader_wait_stats(
     )
 
 
-def _create_session_leader_wait_section(df: pl.DataFrame, idle_hours: int = 6) -> None:
+def _create_session_leader_wait_section(df: pl.DataFrame, idle_hours: int = 1) -> None:
     """Render wait metrics for first jobs submitted after idle periods."""
     if df.is_empty():
         return
@@ -2211,15 +2242,93 @@ def _create_session_leader_wait_section(df: pl.DataFrame, idle_hours: int = 6) -
             user_table.add_row(
                 row["user"][:18],
                 f"{row['leader_jobs']:,}",
-                _format_wait_hours(row["mean_wait_seconds"] / 3600 if row["mean_wait_seconds"] is not None else None),
-                _format_wait_hours(row["median_wait_seconds"] / 3600 if row["median_wait_seconds"] is not None else None),
-                _format_wait_hours(row["p90_wait_seconds"] / 3600 if row["p90_wait_seconds"] is not None else None),
-                _format_wait_hours(row["max_wait_seconds"] / 3600 if row["max_wait_seconds"] is not None else None),
+                _format_wait_from_seconds(row["mean_wait_seconds"]),
+                _format_wait_from_seconds(row["median_wait_seconds"]),
+                _format_wait_from_seconds(row["p90_wait_seconds"]),
+                _format_wait_from_seconds(row["max_wait_seconds"]),
                 f"{row['over_two_hours']:,}",
                 f"{row['over_six_hours']:,}",
             )
 
         console.print(user_table)
+
+
+def _compute_user_wait_hotlist(waited_df: pl.DataFrame) -> pl.DataFrame:
+    """Aggregate wait statistics for all jobs with wait data."""
+    if waited_df.is_empty():
+        return pl.DataFrame(
+            schema={
+                "user": pl.Utf8,
+                "jobs_with_wait": pl.Int64,
+                "mean_wait_seconds": pl.Float64,
+                "median_wait_seconds": pl.Float64,
+                "p90_wait_seconds": pl.Float64,
+                "p95_wait_seconds": pl.Float64,
+                "max_wait_seconds": pl.Float64,
+                "over_two_hours": pl.Int64,
+                "over_six_hours": pl.Int64,
+                "over_twenty_four_hours": pl.Int64,
+            },
+        )
+
+    return (
+        waited_df.group_by("user")
+        .agg(
+            [
+                pl.len().alias("jobs_with_wait"),
+                pl.col("wait_seconds").mean().alias("mean_wait_seconds"),
+                pl.col("wait_seconds").median().alias("median_wait_seconds"),
+                pl.col("wait_seconds").quantile(0.9, interpolation="nearest").alias("p90_wait_seconds"),
+                pl.col("wait_seconds").quantile(0.95, interpolation="nearest").alias("p95_wait_seconds"),
+                pl.col("wait_seconds").max().alias("max_wait_seconds"),
+                pl.col("wait_seconds").gt(7200).sum().alias("over_two_hours"),
+                pl.col("wait_seconds").gt(21600).sum().alias("over_six_hours"),
+                pl.col("wait_seconds").gt(86400).sum().alias("over_twenty_four_hours"),
+            ],
+        )
+        .sort(["max_wait_seconds", "jobs_with_wait"], descending=[True, True])
+    )
+
+
+def _create_all_job_wait_hotlist(df: pl.DataFrame) -> None:
+    """Display per-user wait metrics across all jobs."""
+    waited_df = df.filter(pl.col("wait_seconds").is_not_null())
+    if waited_df.is_empty():
+        return
+
+    user_stats = _compute_user_wait_hotlist(waited_df)
+    if user_stats.is_empty():
+        return
+
+    console.print(Panel.fit("All Jobs Wait Hotlist", style="bold cyan", box=box.DOUBLE_EDGE))
+
+    table = Table(title="Users with Longest Waits", box=box.ROUNDED)
+    table.add_column("User", style="cyan")
+    table.add_column("Jobs", justify="right")
+    table.add_column("Mean", justify="right", style="yellow")
+    table.add_column("Median", justify="right")
+    table.add_column("P90", justify="right")
+    table.add_column("P95", justify="right")
+    table.add_column("Max", justify="right", style="red")
+    table.add_column(">2h", justify="right")
+    table.add_column(">6h", justify="right")
+    table.add_column(">24h", justify="right")
+
+    for row in user_stats.head(15).iter_rows(named=True):
+        table.add_row(
+            row["user"][:18],
+            f"{row['jobs_with_wait']:,}",
+            _format_wait_from_seconds(row["mean_wait_seconds"]),
+            _format_wait_from_seconds(row["median_wait_seconds"]),
+            _format_wait_from_seconds(row["p90_wait_seconds"]),
+            _format_wait_from_seconds(row["p95_wait_seconds"]),
+            _format_wait_from_seconds(row["max_wait_seconds"]),
+            f"{row['over_two_hours']:,}",
+            f"{row['over_six_hours']:,}",
+            f"{row['over_twenty_four_hours']:,}",
+        )
+
+    console.print(table)
 
 
 def _create_user_statistics_section(df: pl.DataFrame) -> None:
@@ -2545,7 +2654,7 @@ def _create_cluster_summary_section(df: pl.DataFrame) -> None:
     console.print(cluster_summary)
 
 
-def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:
+def _create_summary_stats(df: pl.DataFrame, config: Config, leader_idle_hours: int | None = None) -> None:
     """Create and display comprehensive resource usage statistics.
 
     Args:
@@ -2557,12 +2666,14 @@ def _create_summary_stats(df: pl.DataFrame, config: Config) -> None:
         return
 
     prepared_df = _prepare_dataframe_for_analysis(df, config)
+    idle_hours = leader_idle_hours if leader_idle_hours is not None else config.session_leader_idle_hours
     _create_user_statistics_section(prepared_df)
     _create_group_statistics_section(prepared_df)
     _create_node_usage_stats(prepared_df)
     _create_efficiency_analysis_section(prepared_df)
     _create_cluster_summary_section(prepared_df)
-    _create_session_leader_wait_section(prepared_df)
+    _create_session_leader_wait_section(prepared_df, idle_hours=idle_hours)
+    _create_all_job_wait_hotlist(prepared_df)
 
 
 def _create_daily_usage_chart(df: pl.DataFrame) -> None:
@@ -2669,6 +2780,7 @@ def collect(  # noqa: PLR0912, PLR0915
     data_dir: Annotated[Path | None, typer.Option("--data-dir", help="Data directory (default: ./data)")] = None,
     show_summary: Annotated[bool, typer.Option("--summary/--no-summary", help="Show summary after collection")] = True,  # noqa: FBT002
     n_parallel: Annotated[int, typer.Option("--n-parallel", "-n", help="Number of parallel workers for date-based collection")] = 4,
+    leader_idle_hours: Annotated[int | None, typer.Option("--leader-idle-hours", help="Idle hours before a new session leader is counted")] = None,
 ) -> None:
     """Collect job data from SLURM using parallel date-based queries."""
     mode_text = "[yellow]MOCK DATA MODE[/yellow]\n" if USE_MOCK_DATA else ""
@@ -2679,8 +2791,11 @@ def collect(  # noqa: PLR0912, PLR0915
         ),
     )
 
+    if leader_idle_hours is not None and leader_idle_hours < 1:
+        raise typer.BadParameter("leader-idle-hours must be at least 1")
+
     # Create config and ensure directories exist
-    config = Config.create(data_dir=data_dir)
+    config = Config.create(data_dir=data_dir, session_leader_idle_hours=leader_idle_hours)
     config.ensure_directories_exist()
 
     if USE_MOCK_DATA:
@@ -2823,7 +2938,7 @@ def collect(  # noqa: PLR0912, PLR0915
             )
             # Show daily usage trends first
             _create_daily_usage_chart(df)
-            _create_summary_stats(df, config)
+            _create_summary_stats(df, config, leader_idle_hours=leader_idle_hours)
 
     console.print("\n[bold green]✓ Collection complete[/bold green]")
     console.print(f"  Total records processed: {total_processed:,}")
@@ -2833,6 +2948,7 @@ def collect(  # noqa: PLR0912, PLR0915
 def analyze(
     data_dir: Annotated[Path | None, typer.Option("--data-dir", help="Data directory (default: ./data)")] = None,
     days: Annotated[int, typer.Option("--days", "-d", help="Days to analyze")] = 7,
+    leader_idle_hours: Annotated[int | None, typer.Option("--leader-idle-hours", help="Idle hours before a new session leader is counted")] = None,
 ) -> None:
     """Analyze collected job data."""
     console.print(
@@ -2842,7 +2958,10 @@ def analyze(
         ),
     )
 
-    config = Config.create(data_dir=data_dir)
+    if leader_idle_hours is not None and leader_idle_hours < 1:
+        raise typer.BadParameter("leader-idle-hours must be at least 1")
+
+    config = Config.create(data_dir=data_dir, session_leader_idle_hours=leader_idle_hours)
     df = _load_recent_data(config, days)
 
     if df is None or df.is_empty():
@@ -2854,7 +2973,7 @@ def analyze(
     # Show daily usage trends first
     _create_daily_usage_chart(df)
 
-    _create_summary_stats(df, config)
+    _create_summary_stats(df, config, leader_idle_hours=leader_idle_hours)
 
     # State distribution - optimized
     console.print("\n[bold]State Distribution:[/bold]")
