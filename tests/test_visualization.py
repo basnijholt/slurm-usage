@@ -361,6 +361,29 @@ class TestSessionLeaderWaitMetrics:
         assert stats.mean_wait_hours is None
         assert stats.over_two_hours == 0
 
+    def test_compute_user_session_leader_stats_empty(self) -> None:
+        """Empty inputs should return empty schema-consistent DataFrame."""
+        empty_df = pl.DataFrame(schema={"user": pl.Utf8, "wait_seconds": pl.Float64})
+        result = slurm_usage._compute_user_session_leader_stats(empty_df)
+        assert result.is_empty()
+
+    def test_compute_user_session_leader_stats_values(self) -> None:
+        """Per-user aggregation should capture mean/percentile info."""
+        df = pl.DataFrame(
+            {
+                "user": ["alice", "alice", "bob", "bob", "bob"],
+                "wait_seconds": [3600.0, 7200.0, 60.0, 90.0, 10800.0],
+            },
+        )
+
+        stats_df = slurm_usage._compute_user_session_leader_stats(df)
+        stats = {row["user"]: row for row in stats_df.iter_rows(named=True)}
+
+        assert stats["alice"]["leader_jobs"] == 2
+        assert math.isclose(stats["alice"]["mean_wait_seconds"], 5400.0)
+        assert stats["bob"]["leader_jobs"] == 3
+        assert stats["bob"]["over_two_hours"] == 1
+
     @patch("slurm_usage.console.print")
     def test_session_leader_section_handles_missing_submit(self, mock_print: MagicMock) -> None:
         """Session leader section should warn when submit data missing."""

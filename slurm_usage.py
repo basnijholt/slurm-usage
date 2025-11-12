@@ -2006,6 +2006,39 @@ def _identify_session_leader_jobs(df: pl.DataFrame, idle_hours: int = 6) -> pl.D
     return leaders_df
 
 
+def _compute_user_session_leader_stats(leaders_with_wait: pl.DataFrame) -> pl.DataFrame:
+    """Aggregate per-user wait metrics for session leaders."""
+    if leaders_with_wait.is_empty():
+        return pl.DataFrame(
+            schema={
+                "user": pl.Utf8,
+                "leader_jobs": pl.Int64,
+                "mean_wait_seconds": pl.Float64,
+                "median_wait_seconds": pl.Float64,
+                "p90_wait_seconds": pl.Float64,
+                "max_wait_seconds": pl.Float64,
+                "over_two_hours": pl.Int64,
+                "over_six_hours": pl.Int64,
+            },
+        )
+
+    return (
+        leaders_with_wait.group_by("user")
+        .agg(
+            [
+                pl.len().alias("leader_jobs"),
+                pl.col("wait_seconds").mean().alias("mean_wait_seconds"),
+                pl.col("wait_seconds").median().alias("median_wait_seconds"),
+                pl.col("wait_seconds").quantile(0.9, interpolation="nearest").alias("p90_wait_seconds"),
+                pl.col("wait_seconds").max().alias("max_wait_seconds"),
+                pl.col("wait_seconds").gt(7200).sum().alias("over_two_hours"),
+                pl.col("wait_seconds").gt(21600).sum().alias("over_six_hours"),
+            ],
+        )
+        .sort(["mean_wait_seconds", "leader_jobs"], descending=[True, True])
+    )
+
+
 def _calculate_session_leader_wait_stats(
     leaders_df: pl.DataFrame,
     leaders_with_wait: pl.DataFrame,
@@ -2161,6 +2194,32 @@ def _create_session_leader_wait_section(df: pl.DataFrame, idle_hours: int = 6) -
             show_percentage=True,
             item_type="bins",
         )
+
+    user_stats = _compute_user_session_leader_stats(leaders_with_wait)
+    if not user_stats.is_empty():
+        user_table = Table(title="Session Leader Wait by User", box=box.SIMPLE)
+        user_table.add_column("User", style="cyan")
+        user_table.add_column("Leaders", justify="right")
+        user_table.add_column("Mean", justify="right", style="yellow")
+        user_table.add_column("Median", justify="right")
+        user_table.add_column("P90", justify="right")
+        user_table.add_column("Max", justify="right")
+        user_table.add_column(">2h", justify="right")
+        user_table.add_column(">6h", justify="right")
+
+        for row in user_stats.head(15).iter_rows(named=True):
+            user_table.add_row(
+                row["user"][:18],
+                f"{row['leader_jobs']:,}",
+                _format_wait_hours(row["mean_wait_seconds"] / 3600 if row["mean_wait_seconds"] is not None else None),
+                _format_wait_hours(row["median_wait_seconds"] / 3600 if row["median_wait_seconds"] is not None else None),
+                _format_wait_hours(row["p90_wait_seconds"] / 3600 if row["p90_wait_seconds"] is not None else None),
+                _format_wait_hours(row["max_wait_seconds"] / 3600 if row["max_wait_seconds"] is not None else None),
+                f"{row['over_two_hours']:,}",
+                f"{row['over_six_hours']:,}",
+            )
+
+        console.print(user_table)
 
 
 def _create_user_statistics_section(df: pl.DataFrame) -> None:
