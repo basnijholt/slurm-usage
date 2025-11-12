@@ -1995,10 +1995,7 @@ def _identify_session_leader_jobs(df: pl.DataFrame, idle_hours: int = 6) -> pl.D
             pl.when(previous_user.is_null() | (pl.col("user") != previous_user))
             .then(True)
             .otherwise(
-                (
-                    (pl.col("submit_time") - previous_submit).dt.total_seconds()
-                    >= idle_seconds
-                ),
+                ((pl.col("submit_time") - previous_submit).dt.total_seconds() >= idle_seconds),
             )
             .alias("is_session_leader"),
         )

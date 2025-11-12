@@ -410,9 +410,9 @@ class TestSessionLeaderWaitMetrics:
                     base_time,
                 ],
                 "wait_seconds": [
-                    600.0,        # <15m bin
-                    18_000.0,     # 5h -> 2-6h bin and >2h
-                    30_000.0,     # 8h -> 6-12h bin and >6h
+                    600.0,  # <15m bin
+                    18_000.0,  # 5h -> 2-6h bin and >2h
+                    30_000.0,  # 8h -> 6-12h bin and >6h
                 ],
             },
         )
@@ -565,6 +565,7 @@ class TestProcessedSchemaHelpers:
         processed_dt = result["processed_date"][0]
         assert processed_dt.tzinfo is not None
         assert processed_dt.utcoffset() == timedelta(0)
+
 
 class TestErrorHandling:
     """Test error handling in various functions."""
