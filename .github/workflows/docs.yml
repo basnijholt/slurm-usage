@@ -40,7 +40,7 @@ jobs:
           COLUMNS: "90"
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
           SLURM_USE_MOCK_DATA: "1"
-        run: uv run python docs/generate.py
+        run: uv run markdown-code-runner docs/*.md
 
       - name: Build documentation
         run: uv run zensical build
