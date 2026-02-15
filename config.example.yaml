@@ -19,6 +19,9 @@ groups:
     - henry
     - irene
 
+# Idle hours before a user's job counts as a new session leader (default 1)
+session_leader_idle_hours: 1
+
 # Data directory configuration (optional)
 # - If not specified or set to null, defaults to ./data (current working directory)
 # - Set to an explicit path to use a custom location

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 from datetime import datetime, timedelta, timezone
@@ -273,6 +274,203 @@ class TestNodeUsageAnalysis:
         # Should handle empty data gracefully
 
 
+class TestSessionLeaderWaitMetrics:
+    """Test session leader wait metric helpers."""
+
+    def test_identify_session_leader_jobs(self, test_dates: dict[str, str]) -> None:
+        """Ensure session leaders are detected after idle periods."""
+        base_day = test_dates["today"]
+        data = [
+            {
+                "job_id": "job1",
+                "user": "alice",
+                "submit_time": datetime.fromisoformat(f"{base_day}T08:00:00"),
+                "wait_seconds": 600.0,
+            },
+            {
+                "job_id": "job2",
+                "user": "alice",
+                "submit_time": datetime.fromisoformat(f"{base_day}T09:00:00"),
+                "wait_seconds": 800.0,
+            },
+            {
+                "job_id": "job3",
+                "user": "alice",
+                "submit_time": datetime.fromisoformat(f"{base_day}T16:00:00"),
+                "wait_seconds": 900.0,
+            },
+            {
+                "job_id": "job4",
+                "user": "bob",
+                "submit_time": datetime.fromisoformat(f"{base_day}T12:00:00"),
+                "wait_seconds": 1_200.0,
+            },
+            {
+                "job_id": "job5",
+                "user": "bob",
+                "submit_time": datetime.fromisoformat(f"{base_day}T15:00:00"),
+                "wait_seconds": 1_500.0,
+            },
+            {
+                "job_id": "job6",
+                "user": "bob",
+                "submit_time": datetime.fromisoformat(f"{base_day}T23:30:00"),
+                "wait_seconds": 1_800.0,
+            },
+        ]
+
+        df = pl.DataFrame(data)
+        leaders = slurm_usage._identify_session_leader_jobs(df, idle_hours=6)
+
+        assert set(leaders["job_id"].to_list()) == {"job1", "job3", "job4", "job6"}
+
+    def test_calculate_session_leader_wait_stats(self) -> None:
+        """Verify wait statistics aggregation."""
+        leader_data = [
+            {"user": "alice", "wait_seconds": 7_200.0},
+            {"user": "bob", "wait_seconds": 18_000.0},
+            {"user": "bob", "wait_seconds": 3_600.0},
+        ]
+        leaders_df = pl.DataFrame(leader_data)
+        leaders_with_wait = leaders_df.filter(pl.col("wait_seconds").is_not_null())
+
+        stats = slurm_usage._calculate_session_leader_wait_stats(leaders_df, leaders_with_wait, total_jobs=10)
+
+        assert stats is not None
+        assert stats.leader_jobs == 3
+        assert math.isclose(stats.leader_share, 30.0)
+        assert stats.users == 2
+        assert stats.sample_jobs == 3
+        assert stats.over_two_hours == 1
+        assert stats.over_six_hours == 0
+        assert stats.mean_wait_hours is not None and math.isclose(stats.mean_wait_hours, 8 / 3, rel_tol=1e-5)
+        assert stats.median_wait_hours is not None and math.isclose(stats.median_wait_hours, 2.0, rel_tol=1e-5)
+        assert stats.p90_wait_hours is not None and math.isclose(stats.p90_wait_hours, 5.0, rel_tol=1e-5)
+        assert stats.p95_wait_hours is not None and math.isclose(stats.p95_wait_hours, 5.0, rel_tol=1e-5)
+
+    def test_session_leader_stats_without_waits(self) -> None:
+        """Ensure stats handle missing wait data."""
+        data = [{"user": "carol", "wait_seconds": None}]
+        leaders_df = pl.DataFrame(data)
+        leaders_with_wait = leaders_df.filter(pl.col("wait_seconds").is_not_null())
+
+        stats = slurm_usage._calculate_session_leader_wait_stats(leaders_df, leaders_with_wait, total_jobs=5)
+
+        assert stats is not None
+        assert stats.sample_jobs == 0
+        assert stats.mean_wait_hours is None
+        assert stats.over_two_hours == 0
+
+    def test_compute_user_wait_hotlist_empty(self) -> None:
+        """All-job wait hotlist handles empty frames."""
+        empty = pl.DataFrame(schema={"user": pl.Utf8, "wait_seconds": pl.Float64})
+        result = slurm_usage._compute_user_wait_hotlist(empty)
+        assert result.is_empty()
+
+    def test_compute_user_wait_hotlist_values(self) -> None:
+        """All-job wait hotlist returns per-user metrics."""
+        df = pl.DataFrame(
+            {
+                "user": ["alice", "alice", "bob", "bob"],
+                "wait_seconds": [7200.0, 90_000.0, 60.0, 100_000.0],
+            },
+        )
+
+        stats_df = slurm_usage._compute_user_wait_hotlist(df)
+        stats = {row["user"]: row for row in stats_df.iter_rows(named=True)}
+
+        assert stats["alice"]["jobs_with_wait"] == 2
+        assert stats["alice"]["over_twenty_four_hours"] == 1
+        assert stats["bob"]["over_two_hours"] == 1
+
+    def test_compute_user_session_leader_stats_empty(self) -> None:
+        """Empty inputs should return empty schema-consistent DataFrame."""
+        empty_df = pl.DataFrame(schema={"user": pl.Utf8, "wait_seconds": pl.Float64})
+        result = slurm_usage._compute_user_session_leader_stats(empty_df)
+        assert result.is_empty()
+
+    def test_compute_user_session_leader_stats_values(self) -> None:
+        """Per-user aggregation should capture mean/percentile info."""
+        df = pl.DataFrame(
+            {
+                "user": ["alice", "alice", "bob", "bob", "bob"],
+                "wait_seconds": [3600.0, 7200.0, 60.0, 90.0, 10800.0],
+            },
+        )
+
+        stats_df = slurm_usage._compute_user_session_leader_stats(df)
+        stats = {row["user"]: row for row in stats_df.iter_rows(named=True)}
+
+        assert stats["alice"]["leader_jobs"] == 2
+        assert math.isclose(stats["alice"]["mean_wait_seconds"], 5400.0)
+        assert stats["bob"]["leader_jobs"] == 3
+        assert stats["bob"]["over_two_hours"] == 1
+
+    @patch("slurm_usage.console.print")
+    def test_session_leader_section_handles_missing_submit(self, mock_print: MagicMock) -> None:
+        """Session leader section should warn when submit data missing."""
+        df = pl.DataFrame({"user": ["alice"], "submit_time": [None], "wait_seconds": [None]})
+
+        slurm_usage._create_session_leader_wait_section(df, idle_hours=6)
+
+        assert any("Not enough" in str(call.args[0]) for call in mock_print.call_args_list)
+
+    @patch("slurm_usage._create_bar_chart")
+    @patch("slurm_usage.console.print")
+    def test_session_leader_section_without_waits(
+        self,
+        mock_print: MagicMock,
+        mock_chart: MagicMock,
+    ) -> None:
+        """Ensure section renders summary even when no wait values."""
+        base_time = datetime(2025, 1, 1, tzinfo=UTC)
+        df = pl.DataFrame(
+            {
+                "user": ["alice", "alice"],
+                "submit_time": [base_time, base_time + timedelta(hours=8)],
+                "wait_seconds": [None, None],
+            },
+        )
+
+        slurm_usage._create_session_leader_wait_section(df, idle_hours=6)
+
+        assert mock_print.call_count >= 2
+        mock_chart.assert_not_called()
+
+    @patch("slurm_usage._create_bar_chart")
+    @patch("slurm_usage.console.print")
+    def test_session_leader_section_with_waits(
+        self,
+        mock_print: MagicMock,
+        mock_chart: MagicMock,
+    ) -> None:
+        """Ensure wait section shows histogram when data exists."""
+        base_time = datetime(2025, 1, 1, tzinfo=UTC)
+        df = pl.DataFrame(
+            {
+                "user": ["alice", "alice", "bob"],
+                "submit_time": [
+                    base_time,
+                    base_time + timedelta(hours=7),
+                    base_time,
+                ],
+                "wait_seconds": [
+                    600.0,  # <15m bin
+                    18_000.0,  # 5h -> 2-6h bin and >2h
+                    30_000.0,  # 8h -> 6-12h bin and >6h
+                ],
+            },
+        )
+
+        slurm_usage._create_session_leader_wait_section(df, idle_hours=6)
+
+        mock_chart.assert_called_once()
+        labels, counts = mock_chart.call_args.args[:2]
+        assert "2-6h" in labels
+        assert sum(counts) == 3
+        assert mock_print.call_count >= 2
+
+
 class TestSummaryStatistics:
     """Test summary statistics generation."""
 
@@ -377,6 +575,63 @@ class TestSummaryStatistics:
 
         # Should handle groups properly
         assert mock_print.called
+
+    def test_prepare_dataframe_adds_cancelled_wait(self, tmp_path: Path, test_dates: dict[str, str]) -> None:
+        """Cancelled-before-start jobs should get wait_seconds based on cancellation time."""
+        config = slurm_usage.Config.create(data_dir=tmp_path)
+        submit_time = datetime.fromisoformat(f"{test_dates['today']}T08:00:00").replace(tzinfo=UTC)
+        end_time = submit_time + timedelta(hours=5)
+
+        df = pl.DataFrame(
+            {
+                "user": ["user1"],
+                "state": ["CANCELLED"],
+                "submit_time": [submit_time],
+                "start_time": pl.Series("start_time", [None], dtype=pl.Datetime("us", "UTC")),
+                "end_time": [end_time],
+                "elapsed_seconds": [0],
+                "alloc_cpus": [1],
+                "req_mem_mb": [1024.0],
+            },
+        )
+
+        prepared = slurm_usage._prepare_dataframe_for_analysis(df, config)
+        assert prepared["wait_seconds"][0] == 5 * 3600
+
+
+class TestProcessedSchemaHelpers:
+    """Tests for processed schema normalization."""
+
+    def test_ensure_schema_adds_missing_columns(self) -> None:
+        """Missing columns should be added with proper dtypes."""
+        df = pl.DataFrame({"job_id": ["job-1"]})
+        result = slurm_usage._ensure_processed_df_schema(df)
+        schema = slurm_usage.ProcessedJob.get_polars_schema()
+
+        assert result.columns == list(schema.keys())
+        assert result.schema == schema
+
+    def test_ensure_schema_casts_datetime_fields(self) -> None:
+        """String timestamps should be converted to UTC datetime columns."""
+        df = pl.DataFrame(
+            {
+                "job_id": ["job-2"],
+                "user": ["alice"],
+                "submit_time": ["2025-01-02T00:00:00+00:00"],
+                "start_time": ["2025-01-02T08:00:00+00:00"],
+                "processed_date": ["2025-01-03T10:00:00+00:00"],
+            },
+        )
+
+        result = slurm_usage._ensure_processed_df_schema(df)
+        schema = slurm_usage.ProcessedJob.get_polars_schema()
+
+        assert result.schema["submit_time"] == schema["submit_time"]
+        assert result["submit_time"][0].year == 2025
+        assert result["start_time"][0].hour == 8
+        processed_dt = result["processed_date"][0]
+        assert processed_dt.tzinfo is not None
+        assert processed_dt.utcoffset() == timedelta(0)
 
 
 class TestErrorHandling:
