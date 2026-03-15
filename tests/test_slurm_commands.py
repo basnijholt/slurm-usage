@@ -30,8 +30,8 @@ class TestSlurmCommands:
         """Test squeue command."""
         result = slurm_usage.run_squeue()
         assert result.returncode == 0
-        assert "USER/ST/NODES/PARTITION" in result.stdout
-        assert result.command == "squeue -ro %u/%t/%D/%P/%C/%N/%h"
+        assert "USER/ST/NODES/PARTITION/CPUS/NODELIST/OVER_SUBSCRIBE/MEMORY" in result.stdout
+        assert result.command == "squeue -ro %u/%t/%D/%P/%C/%N/%h/%m"
 
         # Parse the output
         lines = result.stdout.strip().split("\n")
@@ -40,7 +40,7 @@ class TestSlurmCommands:
         # Check first data line format
         if len(lines) > 1:
             parts = lines[1].split("/")
-            expected_parts = 7  # user/status/nodes/partition/cpus/nodelist/oversubscribe
+            expected_parts = 8  # user/status/nodes/partition/cpus/nodelist/oversubscribe/memory
             assert len(parts) == expected_parts
 
     def test_run_sinfo_cpus(self) -> None:

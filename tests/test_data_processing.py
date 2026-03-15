@@ -324,7 +324,7 @@ class TestSqueueParsing:
 
     def test_slurm_job_from_line(self) -> None:
         """Test creating SlurmJob from squeue line."""
-        line = "alice/R/1/partition-01/4/node-001/OK"
+        line = "alice/R/1/partition-01/4/node-001/OK/8G"
         job = slurm_usage.SlurmJob.from_line(line)
 
         assert job.user == "alice"
@@ -335,6 +335,7 @@ class TestSqueueParsing:
         assert job.cores == expected_cores
         assert job.node == "node-001"
         assert job.oversubscribe == "OK"
+        assert job.memory_mb == pytest.approx(8192.0)
 
     def test_squeue_output(self) -> None:
         """Test parsing full squeue output."""

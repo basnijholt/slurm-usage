@@ -163,7 +163,10 @@ class TestCurrentUsageMetrics:
         """Test process_data function."""
         jobs = slurm_usage.squeue_output()
 
-        data, total_partition, totals = slurm_usage.process_data(jobs, "cores")
+        aggregated = slurm_usage.process_data(jobs, "cores")
+        data = aggregated.per_user
+        total_partition = aggregated.per_partition
+        totals = aggregated.totals
 
         assert isinstance(data, dict)
         assert isinstance(total_partition, dict)
