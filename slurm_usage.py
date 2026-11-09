@@ -783,7 +783,7 @@ def _parse_cpu_seconds(time_str: str) -> float:
     try:
         # Remove milliseconds
         if "." in time_str:
-            time_str = time_str.split(".")[0]
+            time_str = time_str.split(".", maxsplit=1)[0]
 
         # Handle DD-HH:MM:SS
         if "-" in time_str:
@@ -875,8 +875,8 @@ def parse_node_list(node_list: str) -> list[str]:
 
     # Extract prefix and range part
     try:
-        prefix = node_list.split("[")[0]
-        range_part = node_list.split("[")[1].split("]")[0]
+        prefix = node_list.split("[", maxsplit=1)[0]
+        range_part = node_list.split("[")[1].split("]", maxsplit=1)[0]
 
         # Split by comma to handle multiple ranges/values
         for part in range_part.split(","):
